@@ -7,14 +7,11 @@ import "../src/MockSpokePool.sol";
 
 contract DeployWETHAndMockSpokePool is Script {
     function run() external {
-        vm.startBroadcast();
+        address weth = vm.envOr("WETH_ADDRESS", address(0));
 
-        // Deploy WETH
-        WETH weth = new WETH();
-        console.log("WETH deployed at:", address(weth));
+        vm.startBroadcast(vm.envOr("PRIVATE_KEY", uint256(0)));
 
-        // Deploy MockSpokePool with WETH address
-        MockSpokePool spokePool = new MockSpokePool(address(weth));
+        MockSpokePool spokePool = new MockSpokePool(weth);
         console.log("MockSpokePool deployed at:", address(spokePool));
 
         vm.stopBroadcast();
