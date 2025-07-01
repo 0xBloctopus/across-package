@@ -7,8 +7,8 @@ import {MockHubPool} from "../src/HubPool.sol";
 
 contract DeployHubPoolAndAdapter is Script {
     function run() public {
-        // You can use a private key from env or default to 0
-        uint256 deployer = vm.envOr("PRIVATE_KEY", uint256(0));
+        // Get private key from environment variable
+        uint256 deployer = vm.envUint("PRIVATE_KEY");
 
         vm.startBroadcast(deployer);
 

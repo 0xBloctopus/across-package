@@ -12,8 +12,8 @@ def deploy_hub_pool_and_adapter(plan, rpc_url, private_key):
     )
 
     cmd = """
-    forge script script/DeployHubPoolAndAdapter.s.sol:DeployHubPoolAndAdapter --broadcast --json --skip-simulation --via-ir --rpc-url $RPC_URL --private-key $PRIVATE_KEY 2>&1 \
-    | grep -o '0x[a-fA-F0-9]\\{40\\}' | tail -n 1
+    OUTPUT=$(forge script script/DeployHubPoolAndAdapter.s.sol:DeployHubPoolAndAdapter --json --via-ir --rpc-url $RPC_URL --private-key $PRIVATE_KEY 2>&1)
+    echo "$OUTPUT" | jq -r 'select(.logs != null) | .logs[] | select(contains("HubPool deployed at:")) | match("0x[a-fA-F0-9]{40}").string' 2>/dev/null | head -1 || echo "$OUTPUT" | grep -o "0x[a-fA-F0-9]\{40\}" | head -1
     """
 
     deployment = plan.run_sh(

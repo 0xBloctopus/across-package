@@ -36,5 +36,81 @@ def run(plan, args):
     redis_output = redis.run(plan, service_name="across-redis", image="redis:7")
     redis_url = "redis://{}:{}".format(redis_output.hostname, redis_output.port_number)
     plan.print("Redis running at " + redis_url)
+
+    pool_registration = import_module("./services/contracts/pool_registration.star")
+    relayer_service = import_module("./services/relayer_service.star")
+    dataworker_service = import_module("./services/dataworker_service.star")
+    e2e_test = import_module("./services/testing/e2e_test.star")
+    
+    plan.print("Initializing SpokePool contracts...")
+    spokepool_a_init = spoke_pool_deployer.initialize_spokepool(
+        plan, 
+        networks[0].rpc, 
+        networks[0].private_key, 
+        spokepool_deployment_output["spokepool_address"],
+        output["hubpool_address"]
+    )
+    
+    spokepool_b_init = spoke_pool_deployer.initialize_spokepool(
+        plan,
+        networks[1].rpc,
+        networks[1].private_key, 
+        spoke_pool_b_address["spokepool_address"],
+        output["hubpool_address"]
+    )
+    
+    plan.print("Registering SpokePool contracts with HubPool...")
+    registration_result = pool_registration.register_spoke_pools(
+        plan,
+        networks[0].rpc,
+        networks[0].private_key,
+        output["hubpool_address"],
+        networks[0].chain_id,
+        spokepool_deployment_output["spokepool_address"],
+        networks[1].chain_id,
+        spoke_pool_b_address["spokepool_address"]
+    )
+    
+    plan.print("Deploying Relayer service...")
+    relayer = relayer_service.deploy_relayer_service(
+        plan,
+        networks[0],
+        networks[1], 
+        spokepool_deployment_output["spokepool_address"],
+        spoke_pool_b_address["spokepool_address"],
+        redis_url
+    )
+    
+    plan.print("Deploying DataWorker service...")
+    dataworker = dataworker_service.deploy_dataworker_service(
+        plan,
+        networks[0],
+        networks[0],
+        networks[1],
+        output["hubpool_address"],
+        spokepool_deployment_output["spokepool_address"],
+        spoke_pool_b_address["spokepool_address"],
+        redis_url
+    )
+    
+    plan.print("Running end-to-end test...")
+    test_result = e2e_test.run_e2e_test(
+        plan,
+        networks,
+        spokepool_deployment_output["spokepool_address"],
+        spoke_pool_b_address["spokepool_address"],
+        weth_deployment_output["weth_address"],
+        weth_deployment_output_b["weth_address"]
+    )
+    
+    plan.print("Across Protocol deployment complete!")
+    plan.print("HubPool: " + output["hubpool_address"])
+    plan.print("SpokePool A: " + spokepool_deployment_output["spokepool_address"])
+    plan.print("SpokePool B: " + spoke_pool_b_address["spokepool_address"])
+    plan.print("Relayer service: across-relayer")
+    plan.print("DataWorker service: across-dataworker")
+    plan.print("Redis: " + redis_url)
+
+    return output
     
    
