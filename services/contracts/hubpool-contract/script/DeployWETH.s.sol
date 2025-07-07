@@ -7,7 +7,8 @@ import "../src/WETH.sol";
 contract DeployWETH is Script {
     function run() external {
         vm.startBroadcast();
-        new WETH();
+        WETH weth_address = new WETH();
         vm.stopBroadcast();
+        console2.log("Contract deployed at: ", address(weth_address));
     }
 }

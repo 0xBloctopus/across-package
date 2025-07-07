@@ -1,3 +1,6 @@
+def hex_to_dec(hex_str):
+    return int(hex_str, 16)
+
 def run_e2e_test(plan, networks, spokepool_a_address, spokepool_b_address, weth_a_address, weth_b_address):
     plan.print("Starting end-to-end cross-chain transfer test...")
     
@@ -10,6 +13,16 @@ def run_e2e_test(plan, networks, spokepool_a_address, spokepool_b_address, weth_
         "WETH_A_ADDRESS": weth_a_address,
         "WETH_B_ADDRESS": weth_b_address,
     }
+
+    # Get current time from the contract
+    current_time_hex = $(cast call $SPOKEPOOL_A_ADDRESS 'getCurrentTime()' --rpc-url $CHAIN_A_RPC)
+    current_time_dec=hex_to_dec(current_time_hex)
+
+    # Get depositQuoteTimeBuffer from the contract
+    quote_time_buffer_hex = $(
+        cast call $SPOKEPOOL_A_ADDRESS 'depositQuoteTimeBuffer()' --rpc-url $CHAIN_A_RPC
+    )
+    quote_time_buffer_dec = hex_to_dec(quote_time_buffer_hex)
     
     deposit_cmd = """
     cast send $WETH_A_ADDRESS "approve(address,uint256)" $SPOKEPOOL_A_ADDRESS 1000000000000000000 --rpc-url $CHAIN_A_RPC --private-key $CHAIN_A_PRIVATE_KEY
@@ -23,8 +36,8 @@ def run_e2e_test(plan, networks, spokepool_a_address, spokepool_b_address, weth_
         950000000000000000 \
         $(cast chain-id --rpc-url $CHAIN_B_RPC) \
         0x0000000000000000000000000000000000000000 \
-        $(cast block-number --rpc-url $CHAIN_A_RPC) \
-        $(($(date +%s) + 3600)) \
+        current_time_dec \
+        $(current_time_dec + quote_time_buffer_dec) \
         0 \
         0x \
         --rpc-url $CHAIN_A_RPC --private-key $CHAIN_A_PRIVATE_KEY

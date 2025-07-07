@@ -5,3 +5,4 @@ libs = ["lib"]
 solc = "0.8.20"
 optimizer = true
 viaIR = true
+auto_detect_solc = true
