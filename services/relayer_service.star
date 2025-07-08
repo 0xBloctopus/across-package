@@ -12,7 +12,7 @@ def deploy_relayer_service(plan, chain_a_config, chain_b_config, spokepool_a_add
     }
 
     plan.upload_files(
-        src="relayer",
+        src="./relayer",
         name="relayer-code"
     )
 

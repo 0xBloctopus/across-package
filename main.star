@@ -7,7 +7,7 @@ input_parser = import_module("./utils/input_parser.star")
 deployer = import_module("./services/contracts/deployer.star")
 pool_registration = import_module("./services/contracts/pool_registration.star")
 redis = import_module("github.com/kurtosis-tech/redis-package/main.star")
-relayer_service = import_module("./services/relayer/relayer_service.star")
+relayer_service = import_module("./services/relayer_service.star")
 
 def run(plan, args):
     plan.print("Starting Across Protocol cross-chain simulation...")
@@ -123,7 +123,7 @@ def run(plan, args):
     #     networks[1].private_key,
     #     {
     #         "WETH": weth_address_b,
-    #         "HUBPOOL_ADDRESS": "0x870eA1f9Bf07870c59586c9926E4B05047940d00"
+    #         "HUBPOOL_ADDRESS": hubpool_address
     #     }
     # )
     # plan.print("Spokepool impl output for chain B: " + spokepool_impl_address_b)
@@ -136,7 +136,7 @@ def run(plan, args):
     #     networks[1].private_key,
     #     {
     #         "SPOKEPOOL_IMPL": spokepool_impl_address_b.strip(),
-    #         "HUBPOOL_ADDRESS": "0x870eA1f9Bf07870c59586c9926E4B05047940d00"
+    #         "HUBPOOL_ADDRESS": hubpool_address
     #     }
     # )
     # plan.print("Spoke pool proxy for chain B: " + spokepool_proxy_b)
@@ -175,15 +175,15 @@ def run(plan, args):
     redis_url = "redis://{}:{}".format(redis_output.hostname, redis_output.port_number)
     plan.print("Redis running at " + redis_url)
     
-    plan.print("Deploying Relayer service...")
-    relayer = relayer_service.deploy_relayer_service(
-        plan,
-        networks[0],
-        networks[1], 
-        "0x2e464Fc721F65921E6816c852F59ecb9147DdC9C",
-        "0xE06BD938cAe98e180A31a1eb8b229D000A02EBd1",
-        redis_url
-    )
+    # plan.print("Deploying Relayer service...")
+    # relayer = relayer_service.deploy_relayer_service(
+    #     plan,
+    #     networks[0],
+    #     networks[1], 
+    #     "0x2e464Fc721F65921E6816c852F59ecb9147DdC9C",
+    #     "0xE06BD938cAe98e180A31a1eb8b229D000A02EBd1",
+    #     redis_url
+    # )
     
     # plan.print("Deploying DataWorker service...")
     # dataworker = dataworker_service.deploy_dataworker_service(

@@ -9,12 +9,13 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
+    "@types/node": "^20.0.0",
+    "dotenv": "^17.0.1",
     "ethers": "^6.0.0",
-    "redis": "^4.0.0",
-    "@types/node": "^20.0.0"
+    "redis": "^4.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "ts-node": "^10.0.0"
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
   }
 }
