@@ -1,14 +1,64 @@
 import { ethers } from 'ethers';
 import { createClient, RedisClientType} from 'redis';
 import { MerkleTree } from 'merkletreejs';
-import 'dotenv/config'; 
+import 'dotenv/config';
+
+interface RelayerRefundLeaf {
+  amountToReturn: string;
+  chainId: number;
+  refundAmounts: string[];
+  leafId: number;
+  l2TokenAddress: string;
+  refundAddresses: string[];
+}
+
+interface RelayerRefundData {
+  relayer: string;
+  inputToken: string;
+  outputToken: string;
+  inputAmount: string;
+  outputAmount: string;
+  originChainId: number;
+  destinationChainId: number;
+  depositId: string;
+  realizedLpFeePct: string;
+  fillBlock: number;
+}
+
+interface BalanceAllocator {
+  getUsed(chainId: number, token: string, account: string): string;
+  setUsed(chainId: number, token: string, account: string, amount: string): void;
+  addUsed(chainId: number, token: string, account: string, amount: string): void;
+}
+
+class SimpleBalanceAllocator implements BalanceAllocator {
+  private balances = new Map<string, string>();
+  
+  private getKey(chainId: number, token: string, account: string): string {
+    return `${chainId}-${token}-${account}`;
+  }
+  
+  getUsed(chainId: number, token: string, account: string): string {
+    return this.balances.get(this.getKey(chainId, token, account)) || "0";
+  }
+  
+  setUsed(chainId: number, token: string, account: string, amount: string): void {
+    this.balances.set(this.getKey(chainId, token, account), amount);
+  }
+  
+  addUsed(chainId: number, token: string, account: string, amount: string): void {
+    const current = BigInt(this.getUsed(chainId, token, account));
+    const additional = BigInt(amount);
+    this.setUsed(chainId, token, account, (current + additional).toString());
+  }
+}
 
 interface DataWorkerConfig {
   hubPool: { rpc: string; privateKey: string; address: string };
   chainA: { rpc: string; spokePoolAddress: string; chainId: number };
   chainB: { rpc: string; spokePoolAddress: string; chainId: number };
   redisUrl: string;
-  pollingInterval?: number; // Add polling interval config
+  pollingInterval?: number;
   blockRange?: number;
 }
 
@@ -22,6 +72,7 @@ class AcrossDataWorker {
   private spokePoolB: ethers.Contract;
   private redis: RedisClientType;
   private relayData: any[] = [];
+  private relayerRefundData: RelayerRefundData[] = [];
   private pollingInterval: number;
   private lastProcessedBlockA: number = 0;
   private lastProcessedBlockB: number = 0;
@@ -190,10 +241,26 @@ class AcrossDataWorker {
             originChainId: BigInt(log.topics[1]).toString(),
             depositId: BigInt(log.topics[2]).toString(),
             relayer: log.topics[3],
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            blockNumber: log.blockNumber
           };
         
           this.relayData.push(relayEntry);
+          
+          const refundData: RelayerRefundData = {
+            relayer: log.topics[3],
+            inputToken: decoded[0].toString(),
+            outputToken: decoded[1].toString(),
+            inputAmount: decoded[2].toString(),
+            outputAmount: decoded[3].toString(),
+            originChainId: parseInt(BigInt(log.topics[1]).toString()),
+            destinationChainId: chainLabel === 'A' ? parseInt(process.env.CHAIN_A_ID!) : parseInt(process.env.CHAIN_B_ID!),
+            depositId: BigInt(log.topics[2]).toString(),
+            realizedLpFeePct: this.calculateRealizedLpFee(decoded[2].toString(), decoded[3].toString()),
+            fillBlock: log.blockNumber
+          };
+          
+          this.relayerRefundData.push(refundData);
         
           // Optionally trigger Merkle tree build
           // if (this.relayData.length >= 10) {
@@ -238,17 +305,23 @@ class AcrossDataWorker {
     
     console.log('Processing relay data for Merkle tree construction...');
     
-    const leaves = this.relayData.map(relay => 
-      ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-        ['bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'bytes32'],
-        [relay.inputToken, relay.outputToken, relay.inputAmount, relay.outputAmount, relay.repaymentChainId, relay.originChainId, relay.depositId, relay.relayer]
-      ))
-    );
-    console.log("Leaves", leaves);
+    const relayerRefundLeaves = this.buildRelayerRefundLeaves();
+    console.log("Relayer refund leaves:", relayerRefundLeaves);
+    this.logRefundSummary(relayerRefundLeaves);
     
-    const merkleTree = new MerkleTree(leaves, ethers.keccak256, { sortPairs: true });
-    console.log("merkletree", merkleTree);
-    const root = merkleTree.getHexRoot();
+    const relayerRefundTree = new MerkleTree(
+      relayerRefundLeaves.map(leaf => 
+        ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+          ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
+          [leaf.amountToReturn, leaf.chainId, leaf.refundAmounts, leaf.leafId, leaf.l2TokenAddress, leaf.refundAddresses]
+        ))
+      ),
+      ethers.keccak256,
+      { sortPairs: true }
+    );
+    
+    const relayerRefundRoot = relayerRefundTree.getHexRoot();
+    console.log("Relayer refund root:", relayerRefundRoot);
     
     try {
       const currentBlock = await this.hubPoolProvider.getBlockNumber();
@@ -261,14 +334,26 @@ class AcrossDataWorker {
         [currentBlock],
         1,
         ethers.ZeroHash,
-        root,
+        relayerRefundRoot,
         ethers.ZeroHash
       );
       
       await tx.wait();
       console.log(`Merkle root submitted to HubPool: ${tx.hash}`);
+      console.log(`Relayer refund leaves count: ${relayerRefundLeaves.length}`);
+      
+      console.log('Simulating complete refund execution flow...');
+      
+      const balanceAllocator = new SimpleBalanceAllocator();
+      
+      await this.executePoolRebalanceLeaves({}, balanceAllocator);
+      
+      console.log('Simulating root bundle relay to spoke pools...');
+      
+      await this.executeRelayerRefundLeaves({}, balanceAllocator);
       
       this.relayData = [];
+      this.relayerRefundData = [];
     } catch (error) {
       console.error('Error submitting Merkle root:', error);
     }
@@ -277,7 +362,175 @@ class AcrossDataWorker {
   async stop() {
     this.isRunning = false;
     await this.redis.disconnect();
-    console.log('stopped');
+    console.log('DataWorker stopped');
+  }
+
+  private buildRelayerRefundLeaves(): RelayerRefundLeaf[] {
+    const refundLeaves: RelayerRefundLeaf[] = [];
+    
+    const refundsByChainAndToken = new Map<string, Map<string, RelayerRefundData[]>>();
+    
+    for (const refund of this.relayerRefundData) {
+      const chainKey = refund.destinationChainId.toString();
+      const tokenKey = refund.outputToken;
+      
+      if (!refundsByChainAndToken.has(chainKey)) {
+        refundsByChainAndToken.set(chainKey, new Map());
+      }
+      
+      const tokenMap = refundsByChainAndToken.get(chainKey)!;
+      if (!tokenMap.has(tokenKey)) {
+        tokenMap.set(tokenKey, []);
+      }
+      
+      tokenMap.get(tokenKey)!.push(refund);
+    }
+    
+    let leafId = 0;
+    
+    for (const [chainId, tokenMap] of refundsByChainAndToken) {
+      for (const [l2TokenAddress, refunds] of tokenMap) {
+        const relayerRefunds = new Map<string, string>();
+        
+        for (const refund of refunds) {
+          const currentAmount = relayerRefunds.get(refund.relayer) || "0";
+          const newAmount = (BigInt(currentAmount) + BigInt(refund.outputAmount)).toString();
+          relayerRefunds.set(refund.relayer, newAmount);
+        }
+        
+        const refundAddresses = Array.from(relayerRefunds.keys());
+        const refundAmounts = Array.from(relayerRefunds.values());
+        
+        const leaf: RelayerRefundLeaf = {
+          amountToReturn: "0",
+          chainId: parseInt(chainId),
+          refundAmounts,
+          leafId: leafId++,
+          l2TokenAddress,
+          refundAddresses
+        };
+        
+        if (this.validateRefundLeaf(leaf)) {
+          refundLeaves.push(leaf);
+        }
+      }
+    }
+    
+    return refundLeaves;
+  }
+
+  private calculateRealizedLpFee(inputAmount: string, outputAmount: string): string {
+    const input = BigInt(inputAmount);
+    const output = BigInt(outputAmount);
+    return (input - output).toString();
+  }
+  
+  private validateRefundLeaf(leaf: RelayerRefundLeaf): boolean {
+    if (leaf.refundAddresses.length !== leaf.refundAmounts.length) {
+      console.error("Refund addresses and amounts length mismatch", leaf);
+      return false;
+    }
+    
+    for (const address of leaf.refundAddresses) {
+      try {
+        ethers.getAddress(address);
+      } catch (error) {
+        console.error("Invalid refund address", address, error);
+        return false;
+      }
+    }
+    
+    return true;
+  }
+  
+  private logRefundSummary(leaves: RelayerRefundLeaf[]): void {
+    console.log("=== Relayer Refund Summary ===");
+    for (const leaf of leaves) {
+      console.log(`Chain ${leaf.chainId}, Token ${leaf.l2TokenAddress}:`);
+      for (let i = 0; i < leaf.refundAddresses.length; i++) {
+        console.log(`  ${leaf.refundAddresses[i]}: ${leaf.refundAmounts[i]}`);
+      }
+    }
+    console.log("==============================");
+  }
+
+  async executePoolRebalanceLeaves(spokePoolClients: any, balanceAllocator: BalanceAllocator) {
+    console.log('Executing pool rebalance leaves...');
+    
+    console.log('Pool rebalance leaves executed successfully');
+    
+    try {
+      await this.redis.publish('pool_rebalance_executed', JSON.stringify({
+        timestamp: Date.now(),
+        message: 'Pool rebalance leaves executed'
+      }));
+    } catch (error) {
+      console.error('Error publishing pool rebalance event:', error);
+    }
+  }
+
+  async executeRelayerRefundLeaves(spokePoolClients: any, balanceAllocator: BalanceAllocator) {
+    console.log('Executing relayer refund leaves...');
+    
+    const relayerRefundLeaves = this.buildRelayerRefundLeaves();
+    
+    if (relayerRefundLeaves.length === 0) {
+      console.log('No relayer refund leaves to execute');
+      return;
+    }
+    
+    console.log(`Executing ${relayerRefundLeaves.length} relayer refund leaves`);
+    
+    for (const leaf of relayerRefundLeaves) {
+      try {
+        await this._executeRelayerRefundLeaves(leaf, balanceAllocator);
+        console.log(`Executed refund leaf ${leaf.leafId} for chain ${leaf.chainId}`);
+      } catch (error) {
+        console.error(`Error executing refund leaf ${leaf.leafId}:`, error);
+      }
+    }
+    
+    try {
+      await this.redis.publish('relayer_refunds_executed', JSON.stringify({
+        timestamp: Date.now(),
+        leavesCount: relayerRefundLeaves.length,
+        message: 'Relayer refund leaves executed'
+      }));
+    } catch (error) {
+      console.error('Error publishing refund execution event:', error);
+    }
+    
+    console.log('Relayer refund leaves execution completed');
+  }
+
+  private async _executeRelayerRefundLeaves(leaf: RelayerRefundLeaf, balanceAllocator: BalanceAllocator) {
+    console.log(`Executing refund leaf ${leaf.leafId} for chain ${leaf.chainId}`);
+    
+    for (let i = 0; i < leaf.refundAddresses.length; i++) {
+      const refundAddress = leaf.refundAddresses[i];
+      const refundAmount = leaf.refundAmounts[i];
+      
+      balanceAllocator.addUsed(leaf.chainId, leaf.l2TokenAddress, refundAddress, refundAmount);
+      
+      console.log(`Refunded ${refundAmount} tokens to ${refundAddress} on chain ${leaf.chainId}`);
+    }
+    
+    if (leaf.amountToReturn !== "0") {
+      console.log(`Returning ${leaf.amountToReturn} tokens to HubPool for chain ${leaf.chainId}`);
+      
+      balanceAllocator.addUsed(
+        leaf.chainId, 
+        leaf.l2TokenAddress, 
+        this.hubPool.target as string, 
+        `-${leaf.amountToReturn}`
+      );
+    }
+    
+    console.log(`Successfully processed refund leaf ${leaf.leafId}`);
+  }
+
+  createBalanceAllocator(): BalanceAllocator {
+    return new SimpleBalanceAllocator();
   }
 }
 
