@@ -78,6 +78,8 @@ class AcrossDataWorker {
   private lastProcessedBlockB: number = 0;
   private isRunning: boolean = false;
   private blockRange: number;
+  private chainAId: number;
+  private chainBId: number;
 
   constructor(config: DataWorkerConfig) {
     this.hubPoolProvider = new ethers.JsonRpcProvider(config.hubPool.rpc);
@@ -93,11 +95,17 @@ class AcrossDataWorker {
     this.providerB = new ethers.JsonRpcProvider(config.chainB.rpc);
 
     const spokePoolAbi = [
-      "event FilledRelay(bytes32 indexed inputToken, bytes32 indexed outputToken, uint256 inputAmount, uint256 outputAmount, uint256 repaymentChainId, uint256 indexed originChainId, uint256 indexed depositId, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 exclusiveRelayer, bytes32 indexed relayer, bytes32 depositor, bytes32 recipient, bytes32 messageHash, tuple(bytes32 updatedRecipient, bytes32 updatedMessageHash,uint256 updatedOutputAmount, uint8 fillType) relayExecutionInfo)"
+      "event FilledRelay(bytes32 indexed inputToken, bytes32 indexed outputToken, uint256 inputAmount, uint256 outputAmount, uint256 repaymentChainId, uint256 indexed originChainId, uint256 indexed depositId, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 exclusiveRelayer, bytes32 indexed relayer, bytes32 depositor, bytes32 recipient, bytes32 messageHash, tuple(bytes32 updatedRecipient, bytes32 updatedMessageHash,uint256 updatedOutputAmount, uint8 fillType) relayExecutionInfo)",
+      "function executeRelayerRefundLeaf(uint32 rootBundleId, tuple(uint256 amountToReturn, uint256 chainId, uint256[] refundAmounts, uint32 leafId, address l2TokenAddress, address[] refundAddresses) relayerRefundLeaf, bytes32[] proof) external payable",
+      "function relayRootBundle(bytes32 relayerRefundRoot, bytes32 slowRelayRoot) external"
     ];
     
     this.spokePoolA = new ethers.Contract(config.chainA.spokePoolAddress, spokePoolAbi, this.providerA);
     this.spokePoolB = new ethers.Contract(config.chainB.spokePoolAddress, spokePoolAbi, this.providerB);
+    
+    this.chainAId = config.chainA.chainId;
+    this.chainBId = config.chainB.chainId;
+    
     this.redis = createClient({ url: config.redisUrl });
     this.pollingInterval = config.pollingInterval || 15000; // Default 15 seconds
     this.blockRange = 100;
@@ -342,15 +350,16 @@ class AcrossDataWorker {
       console.log(`Merkle root submitted to HubPool: ${tx.hash}`);
       console.log(`Relayer refund leaves count: ${relayerRefundLeaves.length}`);
       
-      console.log('Simulating complete refund execution flow...');
+      console.log('Executing complete refund execution flow...');
       
       const balanceAllocator = new SimpleBalanceAllocator();
       
       await this.executePoolRebalanceLeaves({}, balanceAllocator);
       
-      console.log('Simulating root bundle relay to spoke pools...');
+      console.log('Relaying root bundle to spoke pools...');
+      await this.relayRootBundleToSpokePools(relayerRefundRoot);
       
-      await this.executeRelayerRefundLeaves({}, balanceAllocator);
+      await this.executeRelayerRefundLeaves({}, balanceAllocator, relayerRefundTree, 1);
       
       this.relayData = [];
       this.relayerRefundData = [];
@@ -469,7 +478,7 @@ class AcrossDataWorker {
     }
   }
 
-  async executeRelayerRefundLeaves(spokePoolClients: any, balanceAllocator: BalanceAllocator) {
+  async executeRelayerRefundLeaves(spokePoolClients: any, balanceAllocator: BalanceAllocator, relayerRefundTree: any, rootBundleId: number) {
     console.log('Executing relayer refund leaves...');
     
     const relayerRefundLeaves = this.buildRelayerRefundLeaves();
@@ -483,7 +492,7 @@ class AcrossDataWorker {
     
     for (const leaf of relayerRefundLeaves) {
       try {
-        await this._executeRelayerRefundLeaves(leaf, balanceAllocator);
+        await this._executeRelayerRefundLeaves(leaf, balanceAllocator, relayerRefundTree, rootBundleId);
         console.log(`Executed refund leaf ${leaf.leafId} for chain ${leaf.chainId}`);
       } catch (error) {
         console.error(`Error executing refund leaf ${leaf.leafId}:`, error);
@@ -503,30 +512,86 @@ class AcrossDataWorker {
     console.log('Relayer refund leaves execution completed');
   }
 
-  private async _executeRelayerRefundLeaves(leaf: RelayerRefundLeaf, balanceAllocator: BalanceAllocator) {
+  private async _executeRelayerRefundLeaves(leaf: RelayerRefundLeaf, balanceAllocator: BalanceAllocator, relayerRefundTree: any, rootBundleId: number) {
     console.log(`Executing refund leaf ${leaf.leafId} for chain ${leaf.chainId}`);
     
-    for (let i = 0; i < leaf.refundAddresses.length; i++) {
-      const refundAddress = leaf.refundAddresses[i];
-      const refundAmount = leaf.refundAmounts[i];
-      
-      balanceAllocator.addUsed(leaf.chainId, leaf.l2TokenAddress, refundAddress, refundAmount);
-      
-      console.log(`Refunded ${refundAmount} tokens to ${refundAddress} on chain ${leaf.chainId}`);
-    }
+    const leafHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+      ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
+      [leaf.amountToReturn, leaf.chainId, leaf.refundAmounts, leaf.leafId, leaf.l2TokenAddress, leaf.refundAddresses]
+    ));
     
-    if (leaf.amountToReturn !== "0") {
-      console.log(`Returning ${leaf.amountToReturn} tokens to HubPool for chain ${leaf.chainId}`);
+    const proof = relayerRefundTree.getHexProof(leafHash);
+    console.log(`Generated merkle proof for leaf ${leaf.leafId}:`, proof);
+    
+    const spokePool = leaf.chainId === this.chainAId ? this.spokePoolA : this.spokePoolB;
+    
+    try {
+      const relayerRefundLeafStruct = {
+        amountToReturn: leaf.amountToReturn,
+        chainId: leaf.chainId,
+        refundAmounts: leaf.refundAmounts,
+        leafId: leaf.leafId,
+        l2TokenAddress: leaf.l2TokenAddress,
+        refundAddresses: leaf.refundAddresses
+      };
       
-      balanceAllocator.addUsed(
-        leaf.chainId, 
-        leaf.l2TokenAddress, 
-        this.hubPool.target as string, 
-        `-${leaf.amountToReturn}`
+      console.log(`Calling executeRelayerRefundLeaf on chain ${leaf.chainId} with:`, {
+        rootBundleId,
+        relayerRefundLeaf: relayerRefundLeafStruct,
+        proofLength: proof.length
+      });
+      
+      const tx = await spokePool.executeRelayerRefundLeaf(
+        rootBundleId,
+        relayerRefundLeafStruct,
+        proof
       );
+      
+      await tx.wait();
+      console.log(`Successfully executed refund leaf ${leaf.leafId} on chain ${leaf.chainId}, tx: ${tx.hash}`);
+      
+      for (let i = 0; i < leaf.refundAddresses.length; i++) {
+        const refundAddress = leaf.refundAddresses[i];
+        const refundAmount = leaf.refundAmounts[i];
+        
+        balanceAllocator.addUsed(leaf.chainId, leaf.l2TokenAddress, refundAddress, refundAmount);
+        
+        console.log(`Refunded ${refundAmount} tokens to ${refundAddress} on chain ${leaf.chainId}`);
+      }
+      
+      if (leaf.amountToReturn !== "0") {
+        console.log(`Returned ${leaf.amountToReturn} tokens to HubPool for chain ${leaf.chainId}`);
+        
+        balanceAllocator.addUsed(
+          leaf.chainId, 
+          leaf.l2TokenAddress, 
+          this.hubPool.target as string, 
+          `-${leaf.amountToReturn}`
+        );
+      }
+      
+    } catch (error) {
+      console.error(`Error executing refund leaf ${leaf.leafId} on chain ${leaf.chainId}:`, error);
+      throw error;
     }
+  }
+
+  async relayRootBundleToSpokePools(relayerRefundRoot: string) {
+    console.log('Relaying root bundle to spoke pools...');
     
-    console.log(`Successfully processed refund leaf ${leaf.leafId}`);
+    try {
+      const txA = await this.spokePoolA.relayRootBundle(relayerRefundRoot, ethers.ZeroHash);
+      await txA.wait();
+      console.log(`Root bundle relayed to chain A: ${txA.hash}`);
+      
+      const txB = await this.spokePoolB.relayRootBundle(relayerRefundRoot, ethers.ZeroHash);
+      await txB.wait();
+      console.log(`Root bundle relayed to chain B: ${txB.hash}`);
+      
+    } catch (error) {
+      console.error('Error relaying root bundle to spoke pools:', error);
+      throw error;
+    }
   }
 
   createBalanceAllocator(): BalanceAllocator {
