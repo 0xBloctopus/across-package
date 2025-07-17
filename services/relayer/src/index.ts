@@ -224,7 +224,7 @@ class AcrossRelayer {
       ];
       
       console.log(`📝 Relay data:`, relayData);
-      const repaymentChainId = 421614;
+      const repaymentChainId = 11155111;
       const repaymentAddress = toBytes32('0xca0AAC84A57e239A2918E9537BCc3Ee29E24b6cd');
 
       const tx = await targetSpokePool.fillRelay(relayData, repaymentChainId, repaymentAddress);
