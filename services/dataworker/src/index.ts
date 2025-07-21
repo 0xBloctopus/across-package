@@ -125,9 +125,25 @@ class AcrossDataWorker {
       console.log('Loaded pool rebalance leaves from Redis:', this.poolRebalanceLeaves.length);
     }
     console.log('🚀 DataWorker service started');
+    // Log the address of the proposer and the private key
+    try {
+      const bundleProposal = await this.hubPool.rootBundleProposal();
+      const proposer = bundleProposal.proposer;
+      console.log('Proposer address from hubPool.rootBundleProposal():', proposer);
+    } catch (err) {
+      console.warn('Could not fetch proposer from hubPool:', err);
+    }
+    console.log('Private key from config:', config.hubPool.privateKey);
+    // Log the address derived from the private key
+    // try {
+    //   const derivedWallet = new ethers.Wallet(config.hubPool.privateKey);
+    //   console.log('Address derived from private key:', derivedWallet.address);
+    // } catch (err) {
+    //   console.warn('Could not derive address from private key:', err);
+    // }
     // Initialize last processed blocks
-    this.lastProcessedBlockA = await this.providerA.getBlockNumber() - 15600;
-    this.lastProcessedBlockB = await this.providerB.getBlockNumber() - 15600;
+    this.lastProcessedBlockA = await this.providerA.getBlockNumber();
+    this.lastProcessedBlockB = await this.providerB.getBlockNumber();
     this.isRunning = true;
     // Start polling for events
     this.startPolling();
@@ -323,92 +339,6 @@ class AcrossDataWorker {
     return ethers.getAddress('0x' + bytes32.slice(-40));
   }
 
-  // private async buildRelayerRefundRoot(): Promise<string> {
-  //   const leaves: string[] = [];
-  //   this.relayerRefundLeaves = []; // Reset leaves
-    
-  //   // Group refunds by chain and token
-  //   const refundsByChainAndToken = new Map<string, Map<string, RelayerRefund[]>>();
-    
-  //   for (const [relayer, refunds] of this.relayerRefunds) {
-  //     for (const refund of refunds) {
-  //       const chainKey = refund.chainId.toString();
-  //       const tokenKey = refund.token;
-        
-  //       if (!refundsByChainAndToken.has(chainKey)) {
-  //         refundsByChainAndToken.set(chainKey, new Map());
-  //       }
-        
-  //       if (!refundsByChainAndToken.get(chainKey)!.has(tokenKey)) {
-  //         refundsByChainAndToken.get(chainKey)!.set(tokenKey, []);
-  //       }
-        
-  //       refundsByChainAndToken.get(chainKey)!.get(tokenKey)!.push(refund);
-  //     }
-  //   }
-    
-  //   // Create RefundLeaf for each chain/token combination
-  //   let leafId = 0;
-  //   for (const [chainId, tokenMap] of refundsByChainAndToken) {
-  //     for (const [token, refunds] of tokenMap) {
-  //       // const refundAddresses = refunds.map(r => r.relayer);
-  //       const refundAddresses = refunds.map(r => this.bytes32ToAddress(r.relayer));
-        
-  //       const refundAmounts = refunds.map(r => r.amount);
-  //       const totalAmount = refundAmounts.reduce((sum, amount) => sum + BigInt(amount), 0n);
-        
-  //       const refundLeaf: RelayerRefundLeaf = {
-  //         amountToReturn: totalAmount.toString(),
-  //         chainId: parseInt(chainId),
-  //         refundAmounts: refundAmounts,
-  //         leafId: leafId++,
-  //         l2TokenAddress: this.bytes32ToAddress(token),
-  //         refundAddresses: refundAddresses
-  //       };
-        
-  //       // LOGGING for debugging
-  //       console.log('--- Refund Leaf ---');
-  //       console.log('amountToReturn:', refundLeaf.amountToReturn, typeof refundLeaf.amountToReturn);
-  //       console.log('chainId:', refundLeaf.chainId, typeof refundLeaf.chainId);
-  //       console.log('refundAmounts:', refundLeaf.refundAmounts, refundLeaf.refundAmounts.map(a => typeof a));
-  //       console.log('leafId:', refundLeaf.leafId, typeof refundLeaf.leafId);
-  //       console.log('l2TokenAddress:', refundLeaf.l2TokenAddress, typeof refundLeaf.l2TokenAddress);
-  //       console.log('refundAddresses:', refundLeaf.refundAddresses, refundLeaf.refundAddresses.map(a => typeof a));
-  //       // Check address formatting
-  //       refundLeaf.refundAddresses.forEach((addr, i) => {
-  //         console.log(`refundAddress[${i}]:`, addr, 'length:', addr.length);
-  //       });
-  //       console.log('-------------------');
-        
-  //       this.relayerRefundLeaves.push(refundLeaf);
-
-  //       console.log('Relayer refund leaves: ', this.relayerRefundLeaves);
-
-  //       // Create leaf hash
-  //       const leafData = ethers.AbiCoder.defaultAbiCoder().encode(
-  //         ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
-  //         [
-  //           refundLeaf.amountToReturn,
-  //           refundLeaf.chainId,
-  //           refundLeaf.refundAmounts,
-  //           refundLeaf.leafId,
-  //           refundLeaf.l2TokenAddress,
-  //           refundLeaf.refundAddresses
-  //         ]
-  //       );
-  //       leaves.push(ethers.keccak256(leafData));
-  //       console.log('Leaves: ', leaves);
-  //     }
-  //   }
-    
-  //   if (leaves.length === 0) {
-  //     return ethers.ZeroHash;
-  //   }
-    
-  //   const merkleTree = new MerkleTree(leaves, ethers.keccak256, { sortPairs: true });
-  //   return merkleTree.getHexRoot();
-  // }
-
   private async buildRelayerRefundRoot(): Promise<string> {
     this.relayerRefundLeaves = []; 
     const leaves: RelayerRefundLeaf[] = [];
@@ -536,10 +466,10 @@ class AcrossDataWorker {
     try {
       console.log("relay data length", this.relayData.length)
       // If there is new relay data, process it first and return
-      // if (this.relayData.length > 0) {
-      // await this.processRelayData();
-      //   return;
-      // }
+      if (this.relayData.length > 0) {
+        await this.processRelayData();
+        return;
+      }
       
       const bundleProposal = await this.hubPool.rootBundleProposal();
       console.log("bundle proposal", bundleProposal);
@@ -566,8 +496,8 @@ class AcrossDataWorker {
         // 3. Execute pool rebalancing
         // await this.executeRootBundleOnHubPool(); 
         // Execute refunds on spoke pools
-        await this.executeRefundsOnSpokePool(this.spokePoolA, parseInt(config.chainA.chainId.toString()));
-        await this.executeRefundsOnSpokePool(this.spokePoolB, parseInt(config.chainB.chainId.toString()));
+        // await this.executeRefundsOnSpokePool(this.spokePoolA, parseInt(config.chainA.chainId.toString()));
+        // await this.executeRefundsOnSpokePool(this.spokePoolB, parseInt(config.chainB.chainId.toString()));
         
         console.log('✅ Bundle execution completed');
         
@@ -657,94 +587,12 @@ class AcrossDataWorker {
       throw error;
     }
   }
-  // private async executeRootBundleOnHubPool() {
-  //   console.log('🏗️ Executing root bundle on HubPool...');
-    
-  //   try {
-  //     // Load the stored pool rebalance leaves that were used in the original proposal
-  //     const storedLeaves = await this.redis.get('lastPoolRebalanceLeaves');
-  //     if (!storedLeaves) {
-  //       throw new Error('No stored pool rebalance leaves found');
-  //     }
-      
-  //     const poolRebalanceLeaves: PoolRebalanceLeaf[] = JSON.parse(storedLeaves);
-  //     console.log('Loaded pool rebalance leaves:', poolRebalanceLeaves.length);
-      
-  //     // Verify we have the right leaves by checking the root
-  //     const merkleTree = this.createPoolRebalanceMerkleTree(poolRebalanceLeaves);
-  //     const bundleProposal = await this.hubPool.rootBundleProposal();
-      
-  //     console.log('Generated pool rebalance root:', merkleTree.getHexRoot());
-  //     console.log('Expected pool rebalance root:', bundleProposal.poolRebalanceRoot);
-      
-  //     if (merkleTree.getHexRoot() !== bundleProposal.poolRebalanceRoot) {
-  //       throw new Error(`Pool rebalance root mismatch. Generated: ${merkleTree.getHexRoot()}, Expected: ${bundleProposal.poolRebalanceRoot}`);
-  //     }
-      
-  //     // Execute each leaf in the correct order
-  //     for (const leaf of poolRebalanceLeaves) {
-  //       const proof = this.generatePoolRebalanceProofForLeaf(merkleTree, leaf);
-        
-  //       console.log(`Executing root bundle for chain ${leaf.chainId}...`);
-  //       console.log('Leaf:', leaf);
-  //       console.log('Proof:', proof);
-        
-  //       const tx = await this.hubPool.executeRootBundle(
-  //         leaf.chainId,
-  //         leaf.groupIndex,
-  //         leaf.bundleLpFees,
-  //         leaf.netSendAmounts,
-  //         leaf.runningBalances,
-  //         leaf.leafId,
-  //         leaf.l1Tokens,
-  //         proof
-  //       );
-        
-  //       await tx.wait();
-  //       console.log(`✅ Root bundle executed for chain ${leaf.chainId}: ${tx.hash}`);
-  //     }
-      
-  //     console.log('✅ All root bundles executed, roots relayed to spoke pools');
-      
-  //   } catch (error) {
-  //     console.error('❌ Error executing root bundle:', error);
-  //     throw error;
-  //   }
-  // }
-  
   
   private createPoolRebalanceMerkleTree(leaves: any[]): MerkleTree {
     const leafHashes = leaves.map(leaf => this.hashPoolRebalanceLeaf(leaf));
     return new MerkleTree(leafHashes, ethers.keccak256, { sortPairs: true });
   }
   
-  // private hashPoolRebalanceLeaf(leaf: any): string {
-  //   // This should match the leaf hashing logic in the HubPool contract
-  //   // The contract likely uses a specific encoding for PoolRebalanceLeaf
-  //   const leafData = ethers.AbiCoder.defaultAbiCoder().encode(
-  //     ['uint256', 'uint256[]', 'int256[]', 'int256[]', 'uint256', 'uint8', 'address[]'],
-  //     // [
-  //     //   leaf.chainId,
-  //     //   leaf.bundleLpFees,
-  //     //   leaf.netSendAmounts,
-  //     //   leaf.runningBalances,
-  //     //   leaf.groupIndex,
-  //     //   leaf.leafId,
-  //     //   leaf.l1Tokens
-  //     // ]
-  //     [
-  //       BigInt(leaf.chainId),
-  //       leaf.bundleLpFees.map(BigInt),
-  //       leaf.netSendAmounts.map(BigInt),
-  //       leaf.runningBalances.map(BigInt),
-  //       BigInt(leaf.groupIndex),
-  //       Number(leaf.leafId),
-  //       leaf.l1Tokens
-  //     ]
-  //   );
-  //   return ethers.keccak256(leafData);
-  // }
-
   private hashPoolRebalanceLeaf(leaf: PoolRebalanceLeaf): string {
     const cleanedLeaf = {
       chainId: BigInt(leaf.chainId),
@@ -813,25 +661,6 @@ class AcrossDataWorker {
     const merkleTree = this.createPoolRebalanceMerkleTree(this.poolRebalanceLeaves);
     return merkleTree.getHexRoot();
   }
-
-  // private hashRelayerRefundLeaf(leaf: RelayerRefundLeaf): string {
-  //   const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-  //     [
-  //       "tuple(" +
-  //         "uint256 amountToReturn," +
-  //         "uint256 chainId," +
-  //         "uint256[] refundAmounts," +
-  //         "uint32 leafId," +
-  //         "address l2TokenAddress," +
-  //         "address[] refundAddresses" +
-  //       ")"
-  //     ],
-  //     [leaf]
-  //   );
-  //   const hash = ethers.keccak256(encoded);
-  //   console.log("RelayerRefundLeaf hash:", hash);
-  //   return hash;
-  // }
 
   private hashRelayerRefundLeaf(leaf: RelayerRefundLeaf): string {
     const cleanedLeaf = {

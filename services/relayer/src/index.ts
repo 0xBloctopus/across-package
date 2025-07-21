@@ -123,6 +123,7 @@ class AcrossRelayer {
     }
 
     const fromBlock = lastProcessedBlock + 1;
+    console.log("Block range", this.blockRange);
     const toBlock = Math.min(fromBlock + this.blockRange - 1, currentBlock);
 
     console.log(`🔍 Polling chain ${chainLabel} from block ${fromBlock} to ${toBlock}`);
@@ -224,8 +225,8 @@ class AcrossRelayer {
       ];
       
       console.log(`📝 Relay data:`, relayData);
-      const repaymentChainId = 11155111;
-      const repaymentAddress = toBytes32('0xca0AAC84A57e239A2918E9537BCc3Ee29E24b6cd');
+      const repaymentChainId = 1225280;
+      const repaymentAddress = toBytes32('0x333F13a6913553EE8C380173B16449d1F7AD0aF9');
 
       const tx = await targetSpokePool.fillRelay(relayData, repaymentChainId, repaymentAddress);
       console.log(`📤 Fill transaction sent: ${tx.hash}`);

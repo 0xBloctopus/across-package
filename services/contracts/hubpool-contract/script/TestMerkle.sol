@@ -40,7 +40,7 @@ contract MerkleRebalanceTest is Test {
 
     function testVerifyPoolRebalance() public {
         PoolRebalanceLeaf memory leaf0 = PoolRebalanceLeaf({
-            chainId: 11155111,
+            chainId: 8674520,
             bundleLpFees: new uint256[](0),
             netSendAmounts: new int256[](0) ,
             runningBalances: new int256[](0),
@@ -50,7 +50,7 @@ contract MerkleRebalanceTest is Test {
         });
 
         PoolRebalanceLeaf memory leaf1 = PoolRebalanceLeaf({
-            chainId: 421614,
+            chainId: 1225280,
             bundleLpFees: new uint256[](0) ,
             netSendAmounts: new int256[](0) ,
             runningBalances: new int256[](0) ,
@@ -67,15 +67,12 @@ contract MerkleRebalanceTest is Test {
         emit log_named_bytes32("root", root);
 
 
-        // Generate proof for leaf0
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = hash1;
 
-        // Validate using MerkleVerifier contract
         bool isValid = verifier.verifyProof(root, proof, hash0);
         assertTrue(isValid, "Proof should be valid for leaf0");
 
-        // Negative test: wrong leaf
         bytes32 fakeLeaf = keccak256("wrong");
         bool invalid = verifier.verifyProof(root, proof, fakeLeaf);
         assertFalse(invalid, "Fake leaf should fail verification");
@@ -86,19 +83,18 @@ contract MerkleRebalanceTest is Test {
 
     function testVerifyRelayerRefund() public {
         RelayerRefundLeaf memory leaf = RelayerRefundLeaf({
-            amountToReturn: 19500,
-            chainId: 11155111,
-            refundAmounts: new uint256[](19500),
+            amountToReturn: 1000000000000000,
+            chainId: 1225280,
+            refundAmounts: new uint256[](1000000000000000),
             leafId: 0,
-            l2TokenAddress: address(0x6b73250CFF2DCE3426D41a45f6f7543C65786d96),
-            refundAddresses: array1Addr(0xca0AAC84A57e239A2918E9537BCc3Ee29E24b6cd)
+            l2TokenAddress: address(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1),
+            refundAddresses: array1Addr(0x333F13a6913553EE8C380173B16449d1F7AD0aF9) 
         });
 
         bytes32 leafHash = hashRelayerLeaf(leaf);
         bytes32[] memory leaves = new bytes32[](1);
         leaves[0] = leafHash;
 
-        // Build Merkle tree (only one leaf, so root = leaf)
         bytes32 root = leafHash;
         bytes32[] memory proof = new bytes32[](0); // No proof needed
 
@@ -114,7 +110,6 @@ contract MerkleRebalanceTest is Test {
         arr = new address[](1);
         arr[0] = val;
     }
-
 
 
 }
