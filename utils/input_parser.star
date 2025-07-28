@@ -1,30 +1,42 @@
-REQUIRED_FIELDS = [
-    "name",
+REQUIRED_NETWORK_FIELDS = [
+    "type",
+    "chain_id",
     "rpc",
     "private_key",
+    "spokepool_address",
 ]
 
-OPTIONAL_FIELDS = [
-    "endpoint",
-    "trusted_send_lib",
-    "trusted_receive_lib",
-    "eid",
-    "chain_id",
+REQUIRED_RELAYER_FIELDS = [
+    "private_key",
+    "polling_interval",
+    "block_range",
+    "repayment_address",
+]
+
+REQUIRED_DATAWORKER_FIELDS = [
+    "hubpool_address",
+    "hubpool_private_key",
+    "hubpool_rpc"
 ]
 
 def input_parser(plan, input_args):
     if "networks" not in input_args:
         fail("Input must contain 'networks' field.")
+    if "relayer" not in input_args:
+        fail("Input must contain 'relayer' field.")
+    if "dataworker" not in input_args:
+        fail("Input must contain 'dataworker' field.")
 
     networks = input_args["networks"]
     # if len(networks) < 2:
     #     fail("At least two networks must be specified.")
+    relayer = input_args["relayer"]
+    dataworker = input_args["dataworker"]
 
     parsed_networks = []
-
     for idx, network in enumerate(networks):
         # Validate required fields
-        for field in REQUIRED_FIELDS:
+        for field in REQUIRED_NETWORK_FIELDS:
             if field not in network:
                 fail("Network %d is missing required field '%s'." % (idx, field))
 
@@ -38,24 +50,51 @@ def input_parser(plan, input_args):
             name = "curl-job-%d" % idx,
             image = "badouralix/curl-jq",
             wait = "180s",
-            description = "Validating RPC connectivity for network %s" % network["name"]
+            description = "Validating RPC connectivity for network %s" % network["type"]
         )
 
-        # Verify that the chain id matches the expected value using plan.verify
         plan.verify(
             value = result.output,
             assertion = "==",
             target_value = expected_chain_id,
-            description = "Verifying chain id for network %s" % network["name"]
+            description = "Verifying chain id for network %s" % network["type"]
         )
 
-        plan.print("RPC verification passed for network '%s' (chain id: %s)" % (network["name"], result.output))
+        plan.print("RPC verification passed for network '%s' (chain id: %s)" % (network["type"], result.output))
 
         parsed_networks.append(struct(
-            name = network["name"],
+            type = network["type"],
             chain_id = network["chain_id"],
             rpc = network["rpc"],
-            private_key = network["private_key"]
+            private_key = network["private_key"],
+            spokepool_address = network["spokepool_address"]
         ))
 
-    return parsed_networks
+    # Validate relayer fields
+    for field in REQUIRED_RELAYER_FIELDS:
+        if field not in relayer:
+            fail("Relayer config missing required field '%s'." % field)
+
+    parsed_relayer = struct(
+        private_key = relayer["private_key"],
+        polling_interval = relayer["polling_interval"],
+        block_range = relayer["block_range"],
+        repayment_address = relayer["repayment_address"]
+    )
+
+    # Validate dataworker fields
+    for field in REQUIRED_DATAWORKER_FIELDS:
+        if field not in dataworker:
+            fail("Dataworker config missing required field '%s'." % field)
+
+    parsed_dataworker = struct(
+        hubpool_address = dataworker["hubpool_address"],
+        hubpool_private_key = dataworker["hubpool_private_key"],
+        hubpool_rpc = dataworker["hubpool_rpc"]
+    )
+
+    return struct(
+        networks = parsed_networks,
+        relayer = parsed_relayer,
+        dataworker = parsed_dataworker
+    )

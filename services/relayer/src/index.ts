@@ -226,9 +226,11 @@ class AcrossRelayer {
       
       console.log(`📝 Relay data:`, relayData);
       const repaymentChainId = 1225280;
-      const repaymentAddress = toBytes32('0x333F13a6913553EE8C380173B16449d1F7AD0aF9');
+      const repaymentAddress = process.env.REPAYMENT_ADDRESS || "";
+      const repaymentAddressBytes32 = toBytes32(repaymentAddress);
+      // const repaymentAddress = toBytes32('0x333F13a6913553EE8C380173B16449d1F7AD0aF9');
 
-      const tx = await targetSpokePool.fillRelay(relayData, repaymentChainId, repaymentAddress);
+      const tx = await targetSpokePool.fillRelay(relayData, repaymentChainId, repaymentAddressBytes32);
       console.log(`📤 Fill transaction sent: ${tx.hash}`);
       
       const receipt = await tx.wait();

@@ -8,13 +8,20 @@ deployer = import_module("./services/contracts/deployer.star")
 pool_registration = import_module("./services/contracts/pool_registration.star")
 redis = import_module("github.com/kurtosis-tech/redis-package/main.star")
 relayer_service = import_module("./services/relayer_service.star")
+dataworker_service = import_module("./services/dataworker_service.star")
 
 def run(plan, args):
     plan.print("Starting Across Protocol cross-chain simulation...")
     plan.print("Parsing the L1 input args")
-    networks = input_parser.input_parser(plan, args)
+    parsed_data = input_parser.input_parser(plan, args)
+    plan.print(parsed_data)
     plan.print("networks")
-    plan.print(networks)
+    plan.print(parsed_data.networks[0].spokepool_address)
+    plan.print(parsed_data.networks[1].spokepool_address)
+    plan.print("relayer")
+    plan.print(parsed_data.relayer)
+    plan.print("dataworker")
+    plan.print(parsed_data.dataworker)
     
     # weth_address = deployer.deploy_contract(
     #     plan,
@@ -175,27 +182,27 @@ def run(plan, args):
     redis_url = "redis://{}:{}".format(redis_output.hostname, redis_output.port_number)
     plan.print("Redis running at " + redis_url)
     
-    # plan.print("Deploying Relayer service...")
-    # relayer = relayer_service.deploy_relayer_service(
-    #     plan,
-    #     networks[0],
-    #     networks[1], 
-    #     "0x2e464Fc721F65921E6816c852F59ecb9147DdC9C",
-    #     "0xE06BD938cAe98e180A31a1eb8b229D000A02EBd1",
-    #     redis_url
-    # )
+    plan.print("Deploying Relayer service...")
+    relayer = relayer_service.deploy_relayer_service(
+        plan,
+        parsed_data.networks[0],
+        parsed_data.networks[1], 
+        parsed_data.relayer.repayment_address,
+        parsed_data.relayer.polling_interval,
+        parsed_data.relayer.block_range,
+        parsed_data.relayer.private_key,
+        redis_url
+    )
     
-    # plan.print("Deploying DataWorker service...")
-    # dataworker = dataworker_service.deploy_dataworker_service(
-    #     plan,
-    #     networks[0],
-    #     networks[0],
-    #     networks[1],
-    #     output["hubpool_address"],
-    #     spokepool_deployment_output["spokepool_address"],
-    #     spoke_pool_b_address["spokepool_address"],
-    #     redis_url
-    # )
+    plan.print("Deploying DataWorker service...")
+    dataworker = dataworker_service.deploy_dataworker_service(
+        plan,
+        parsed_data.dataworker,
+        parsed_data.networks[0],
+        parsed_data.networks[1],
+        redis_url
+    )
+
     
     # plan.print("Running end-to-end test...")
     # test_result = e2e_test.run_e2e_test(

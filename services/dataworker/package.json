@@ -9,7 +9,6 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
-    "@across-protocol/sdk": "^4.3.12",
     "@types/node": "^20.0.0",
     "dotenv": "^17.1.0",
     "ethers": "^6.15.0",

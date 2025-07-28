@@ -130,8 +130,13 @@ class AcrossDataWorker {
       const bundleProposal = await this.hubPool.rootBundleProposal();
       const proposer = bundleProposal.proposer;
       console.log('Proposer address from hubPool.rootBundleProposal():', proposer);
-    } catch (err) {
-      console.warn('Could not fetch proposer from hubPool:', err);
+    } catch (err: any) {
+      if (err.code === 'BAD_DATA' || err.value === '0x') {
+        console.log('⚠️ HubPool contract not found at address:', this.hubPool.target);
+        console.log('📝 This is expected if contracts are not deployed yet.');
+      } else {
+        console.warn('Could not fetch proposer from hubPool:', err);
+      }
     }
     console.log('Private key from config:', config.hubPool.privateKey);
     // Log the address derived from the private key
@@ -471,43 +476,54 @@ class AcrossDataWorker {
         return;
       }
       
-      const bundleProposal = await this.hubPool.rootBundleProposal();
-      console.log("bundle proposal", bundleProposal);
-      // If there is no bundle proposal, propose a new one
-      // if (!bundleProposal.challengePeriodEndTimestamp || bundleProposal.challengePeriodEndTimestamp === 0n) {
-      if (bundleProposal.unclaimedPoolRebalanceLeafCount == 0n) {
-        console.log('No bundle proposal exists, proposing new bundle...');
-        await this.processRelayData();
-        return;
-      }
-      const currentTime = await this.hubPool.getCurrentTime();
-      const liveness = await this.hubPool.liveness();
-     
-      
-      // Check if challenge period has passed
-      if (bundleProposal.challengePeriodEndTimestamp > 0n && 
-          currentTime >= bundleProposal.challengePeriodEndTimestamp) {
-        
-        console.log('⏰ Challenge period ended, bundle can be executed');
-        
-        // In a full implementation, you would:
-        // 1. Generate merkle proofs for each refund leaf
-        // 2. Execute refunds on spoke pools
-        // 3. Execute pool rebalancing
-        // await this.executeRootBundleOnHubPool(); 
-        // Execute refunds on spoke pools
-        // await this.executeRefundsOnSpokePool(this.spokePoolA, parseInt(config.chainA.chainId.toString()));
-        // await this.executeRefundsOnSpokePool(this.spokePoolB, parseInt(config.chainB.chainId.toString()));
-        
-        console.log('✅ Bundle execution completed');
-        
-        // Trigger new bundle proposal if we have more data
-        if (this.relayData.length > 0) {
+      // Check if HubPool contract exists and is accessible
+      try {
+        const bundleProposal = await this.hubPool.rootBundleProposal();
+        console.log("bundle proposal", bundleProposal);
+        // If there is no bundle proposal, propose a new one
+        // if (!bundleProposal.challengePeriodEndTimestamp || bundleProposal.challengePeriodEndTimestamp === 0n) {
+        if (bundleProposal.unclaimedPoolRebalanceLeafCount == 0n) {
+          console.log('No bundle proposal exists, proposing new bundle...');
           await this.processRelayData();
+          return;
         }
-      } else if (bundleProposal.challengePeriodEndTimestamp > 0n) {
-        const timeRemaining = bundleProposal.challengePeriodEndTimestamp - currentTime;
-        console.log(`⏳ Challenge period active, ${timeRemaining} seconds remaining`);
+        const currentTime = await this.hubPool.getCurrentTime();
+        const liveness = await this.hubPool.liveness();
+       
+        
+        // Check if challenge period has passed
+        if (bundleProposal.challengePeriodEndTimestamp > 0n && 
+            currentTime >= bundleProposal.challengePeriodEndTimestamp) {
+          
+          console.log('⏰ Challenge period ended, bundle can be executed');
+          
+          // In a full implementation, you would:
+          // 1. Generate merkle proofs for each refund leaf
+          // 2. Execute refunds on spoke pools
+          // 3. Execute pool rebalancing
+          await this.executeRootBundleOnHubPool(); 
+          // Execute refunds on spoke pools
+          await this.executeRefundsOnSpokePool(this.spokePoolA, parseInt(config.chainA.chainId.toString()));
+          await this.executeRefundsOnSpokePool(this.spokePoolB, parseInt(config.chainB.chainId.toString()));
+          
+          console.log('✅ Bundle execution completed');
+          
+          // Trigger new bundle proposal if we have more data
+          if (this.relayData.length > 0) {
+            await this.processRelayData();
+          }
+        } else if (bundleProposal.challengePeriodEndTimestamp > 0n) {
+          const timeRemaining = bundleProposal.challengePeriodEndTimestamp - currentTime;
+          console.log(`⏳ Challenge period active, ${timeRemaining} seconds remaining`);
+        }
+      } catch (hubPoolError: any) {
+        // Handle case where HubPool contract doesn't exist or is not accessible
+        if (hubPoolError.code === 'BAD_DATA' || hubPoolError.value === '0x') {
+          console.log('⚠️ HubPool contract not found or not accessible at address:', this.hubPool.target);
+          console.log('📝 This is expected if contracts are not deployed yet. Dataworker will continue monitoring for relay events.');
+          return;
+        }
+        throw hubPoolError; // Re-throw other errors
       }
     } catch (error) {
       console.error('❌ Error checking bundle status:', error);
@@ -518,11 +534,9 @@ class AcrossDataWorker {
     console.log('🏗️ Executing root bundle on HubPool...');
     
     try {
-      // Get the current bundle proposal to get the actual pool rebalance root
       const bundleProposal = await this.hubPool.rootBundleProposal();
       console.log('Bundle proposal pool rebalance root:', bundleProposal.poolRebalanceRoot);
       
-      // Create pool rebalance leaves for each chain
       const chainIds = [config.chainA.chainId, config.chainB.chainId];
       const poolRebalanceLeaves = [];
       
