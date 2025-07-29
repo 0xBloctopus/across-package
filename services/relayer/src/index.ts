@@ -2,164 +2,181 @@ import { ethers } from 'ethers';
 import { createClient, RedisClientType} from 'redis';
 import 'dotenv/config';
 
+interface ChainConfig {
+  rpc: string;
+  privateKey: string;
+  spokePoolAddress: string;
+  chainId: number;
+  type: string; 
+}
+
 interface RelayerConfig {
-  chainA: { rpc: string; privateKey: string; spokePoolAddress: string; chainId: number };
-  chainB: { rpc: string; privateKey: string; spokePoolAddress: string; chainId: number };
+  chains: { [chainId: string]: ChainConfig };
   redisUrl: string;
   pollingInterval?: number;
   blockRange?: number;
+  repaymentChainId?: number;
+  repaymentAddress?: string;
 }
 
-class AcrossRelayer {
-  private providerA: ethers.JsonRpcProvider;
-  private providerB: ethers.JsonRpcProvider;
-  private walletA: ethers.Wallet;
-  private walletB: ethers.Wallet;
-  private spokePoolA: ethers.Contract;
-  private spokePoolB: ethers.Contract;
+interface ChainState {
+  provider: ethers.JsonRpcProvider;
+  wallet: ethers.Wallet;
+  spokePool: ethers.Contract;
+  lastProcessedBlock: number;
+  chainId: string;
+  config: ChainConfig;
+}
+
+class MultiChainAcrossRelayer {
+  private chains: Map<string, ChainState> = new Map();
   private redis: RedisClientType;
   private pollingInterval: number;
   private blockRange: number;
-  private lastProcessedBlockA: number = 0;
-  private lastProcessedBlockB: number = 0;
   private isRunning: boolean = false;
+  private repaymentChainId: number;
+  private repaymentAddress: string;
 
   constructor(config: RelayerConfig) {
-    console.log('🚀 Initializing Across Relayer...');
-    console.log('CHAIN_A_PRIVATE_KEY length:', process.env.CHAIN_A_PRIVATE_KEY?.length);
+    console.log('🚀 Initializing Multi-Chain Across Relayer...');
     
-    this.providerA = new ethers.JsonRpcProvider(config.chainA.rpc);
-    this.providerB = new ethers.JsonRpcProvider(config.chainB.rpc);
-    this.walletA = new ethers.Wallet(config.chainA.privateKey, this.providerA);
-    this.walletB = new ethers.Wallet(config.chainB.privateKey, this.providerB);
     this.pollingInterval = config.pollingInterval || 5000;
     this.blockRange = config.blockRange || 100;
-    
+    this.repaymentChainId = config.repaymentChainId || 1225280;
+    this.repaymentAddress = config.repaymentAddress || '0x333F13a6913553EE8C380173B16449d1F7AD0aF9';
+    this.redis = createClient({ url: config.redisUrl });
+
     const spokePoolAbi = [
       "event FundsDeposited(bytes32 inputToken, bytes32 outputToken, uint256 inputAmount, uint256 outputAmount, uint256 indexed destinationChainId, uint256 indexed depositId, uint32 quoteTimestamp, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 indexed depositor, bytes32 recipient, bytes32 exclusiveRelayer, bytes message)",
       "function fillRelay((bytes32,bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint32,uint32,bytes),uint256,bytes32) external"
     ];
-    
-    this.spokePoolA = new ethers.Contract(config.chainA.spokePoolAddress, spokePoolAbi, this.walletA);
-    this.spokePoolB = new ethers.Contract(config.chainB.spokePoolAddress, spokePoolAbi, this.walletB);
-    this.redis = createClient({ url: config.redisUrl });
+
+    // Initialize all chains
+    for (const [chainId, chainConfig] of Object.entries(config.chains)) {
+      console.log(`🔧 Setting up chain ${chainConfig.type} (${chainId})`);
+      
+      const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+      const wallet = new ethers.Wallet(chainConfig.privateKey, provider);
+      const spokePool = new ethers.Contract(chainConfig.spokePoolAddress, spokePoolAbi, wallet);
+
+      const chainState: ChainState = {
+        provider,
+        wallet,
+        spokePool,
+        lastProcessedBlock: 0,
+        chainId,
+        config: chainConfig
+      };
+
+      this.chains.set(chainId, chainState);
+      console.log(`✅ Chain ${chainConfig.type} (${chainId}) initialized`);
+    }
+
+    console.log(`📊 Total chains configured: ${this.chains.size}`);
   }
 
   async start() {
     await this.redis.connect();
     console.log('✅ Redis connected');
     
-    const networkA = await this.providerA.getNetwork();
-    const networkB = await this.providerB.getNetwork();
-    
-    console.log(`🔗 Chain A: ${networkA.name} (${networkA.chainId})`);
-    console.log(`🔗 Chain B: ${networkB.name} (${networkB.chainId})`);
-    
-    // Initialize starting blocks
-    this.lastProcessedBlockA = await this.providerA.getBlockNumber();
-    this.lastProcessedBlockB = await this.providerB.getBlockNumber();
-    
-    console.log(`📊 Starting from block A: ${this.lastProcessedBlockA}`);
-    console.log(`📊 Starting from block B: ${this.lastProcessedBlockB}`);
+    // Initialize all chains
+    for (const [chainId, chainState] of this.chains) {
+      try {
+        const network = await chainState.provider.getNetwork();
+        console.log(`🔗 Chain ${chainState.config.type}: (${network.chainId})`);
+        
+        // Get current block number
+        chainState.lastProcessedBlock = await chainState.provider.getBlockNumber();
+        console.log(`📊 Starting from block for ${chainState.config.type}: ${chainState.lastProcessedBlock}`);
+        
+        // Verify chain ID matches configuration
+        if (network.chainId.toString() !== chainId) {
+          console.warn(`⚠️  Warning: Chain ID mismatch for ${chainState.config.type}. Expected: ${chainId}, Got: ${network.chainId}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error initializing chain ${chainState.config.type}:`, error);
+        throw error;
+      }
+    }
     
     await this.initializeFromRedis();
     
     this.isRunning = true;
-    console.log('🚀 Relayer service started');
+    console.log('🚀 Multi-chain relayer service started');
     
-    // Start polling
+    // Start polling all chains
     this.startPolling();
   }
 
   async stop() {
     this.isRunning = false;
     await this.redis.disconnect();
-    console.log('🛑 Relayer service stopped');
+    console.log('🛑 Multi-chain relayer service stopped');
   }
 
   private async startPolling() {
-    const pollChainA = async () => {
-      if (!this.isRunning) return;
-      
-      try {
-        await this.pollForEvents('A', this.spokePoolA, this.providerA);
-      } catch (error) {
-        console.error('❌ Error polling chain A:', error);
-      }
-      
-      if (this.isRunning) {
-        setTimeout(pollChainA, this.pollingInterval);
-      }
-    };
+    // Create a polling function for each chain
+    const pollingFunctions = Array.from(this.chains.entries()).map(([chainId, chainState]) => {
+      const pollChain = async () => {
+        if (!this.isRunning) return;
+        
+        try {
+          await this.pollForEvents(chainId, chainState);
+        } catch (error) {
+          console.error(`❌ Error polling chain ${chainState.config.type} (${chainId}):`, error);
+        }
+        
+        if (this.isRunning) {
+          setTimeout(pollChain, this.pollingInterval);
+        }
+      };
 
-    const pollChainB = async () => {
-      if (!this.isRunning) return;
-      
-      try {
-        await this.pollForEvents('B', this.spokePoolB, this.providerB);
-      } catch (error) {
-        console.error('❌ Error polling chain B:', error);
-      }
-      
-      if (this.isRunning) {
-        setTimeout(pollChainB, this.pollingInterval);
-      }
-    };
+      return pollChain;
+    });
 
-    pollChainA();
-    pollChainB();
+    // Start all polling functions
+    pollingFunctions.forEach(pollFn => pollFn());
+    console.log(`🔄 Started polling ${pollingFunctions.length} chains`);
   }
 
-  private async pollForEvents(
-    chainLabel: string, 
-    spokePool: ethers.Contract, 
-    provider: ethers.JsonRpcProvider
-  ) {
-    const currentBlock = await provider.getBlockNumber();
-    const lastProcessedBlock = chainLabel === 'A' ? this.lastProcessedBlockA : this.lastProcessedBlockB;
+  private async pollForEvents(chainId: string, chainState: ChainState) {
+    const currentBlock = await chainState.provider.getBlockNumber();
     
-    if (currentBlock <= lastProcessedBlock) {
+    if (currentBlock <= chainState.lastProcessedBlock) {
       return;
     }
 
-    const fromBlock = lastProcessedBlock + 1;
-    console.log("Block range", this.blockRange);
+    const fromBlock = chainState.lastProcessedBlock + 1;
     const toBlock = Math.min(fromBlock + this.blockRange - 1, currentBlock);
 
-    console.log(`🔍 Polling chain ${chainLabel} from block ${fromBlock} to ${toBlock}`);
+    console.log(`🔍 Polling ${chainState.config.type} (${chainId}) from block ${fromBlock} to ${toBlock}`);
 
     try {
       // Query FundsDeposited events
-      const events = await spokePool.queryFilter(
-        spokePool.filters.FundsDeposited(),
+      const events = await chainState.spokePool.queryFilter(
+        chainState.spokePool.filters.FundsDeposited(),
         fromBlock,
         toBlock
       );
 
-      console.log(`📝 Found ${events.length} FundsDeposited events on chain ${chainLabel}`);
+      console.log(`📝 Found ${events.length} FundsDeposited events on ${chainState.config.type}`);
 
       for (const event of events) {
         if ('args' in event) { 
-          await this.handleDepositEvent(chainLabel, event);
+          await this.handleDepositEvent(chainId, chainState, event);
         }
       }
 
       // Update last processed block
-      if (chainLabel === 'A') {
-        this.lastProcessedBlockA = toBlock;
-      } else {
-        this.lastProcessedBlockB = toBlock;
-      }
-
-      await this.redis.set(`lastProcessedBlock_${chainLabel}`, toBlock.toString());
-      console.log(`Redis updated: lastProcessedBlock_${chainLabel} = ${toBlock}`);
+      chainState.lastProcessedBlock = toBlock;
+      await this.redis.set(`lastProcessedBlock_${chainId}`, toBlock.toString());
 
     } catch (error) {
-      console.error(`❌ Error querying events for chain ${chainLabel}:`, error);
+      console.error(`❌ Error querying events for ${chainState.config.type} (${chainId}):`, error);
     }
   }
 
-  private async handleDepositEvent(sourceChain: string, event: ethers.EventLog) {
+  private async handleDepositEvent(sourceChainId: string, sourceChainState: ChainState, event: ethers.EventLog) {
     const { args } = event;
     if (!args) return;
 
@@ -168,7 +185,7 @@ class AcrossRelayer {
     const outputTokenAddress = ethers.getAddress('0x' + outputToken.slice(26));
     const toBytes32 = (address: string) => ethers.zeroPadValue(address, 32);
 
-    console.log(`🎯 Deposit detected on chain ${sourceChain}:`, { 
+    console.log(`🎯 Deposit detected on ${sourceChainState.config.type}:`, { 
       depositId: depositId.toString(), 
       destinationChainId: destinationChainId.toString(),
       blockNumber: event.blockNumber,
@@ -181,23 +198,17 @@ class AcrossRelayer {
       recipient: toBytes32(recipient), 
     });
     
-    const networkA = await this.walletA.provider!.getNetwork();
-    const networkB = await this.walletB.provider!.getNetwork();
-
-    // Determine target chain
+    // Find target chain
     const targetChainId = destinationChainId.toString();
-    const isTargetChainA = targetChainId === networkA.chainId?.toString();
-    const isTargetChainB = targetChainId === networkB.chainId?.toString();
+    const targetChainState = this.chains.get(targetChainId);
     
-    if (!isTargetChainA && !isTargetChainB) {
+    if (!targetChainState) {
       console.log(`⚠️  Destination chain ${targetChainId} not supported by this relayer`);
+      console.log(`📋 Supported chains: ${Array.from(this.chains.keys()).join(', ')}`);
       return;
     }
 
-    const targetSpokePool = isTargetChainA ? this.spokePoolA : this.spokePoolB;
-    const targetChainLabel = isTargetChainA ? 'A' : 'B';
-    
-    console.log(`🎯 Filling relay on chain ${targetChainLabel} (${targetChainId})`);
+    console.log(`🎯 Filling relay on ${targetChainState.config.type} (${targetChainId})`);
     
     try {
       // Check if already processed
@@ -217,24 +228,21 @@ class AcrossRelayer {
         toBytes32(outputToken),
         inputAmount,
         outputAmount,
-        sourceChain === 'A' ? networkA.chainId : networkB.chainId,
+        sourceChainId,
         depositId,
         fillDeadline,
         exclusivityDeadline,
         message
       ];
       
-      console.log(`📝 Relay data:`, relayData);
-      const repaymentChainId = 1225280;
-      const repaymentAddress = process.env.REPAYMENT_ADDRESS || "";
-      const repaymentAddressBytes32 = toBytes32(repaymentAddress);
-      // const repaymentAddress = toBytes32('0x333F13a6913553EE8C380173B16449d1F7AD0aF9');
+      console.log(`📝 Relay data prepared for ${targetChainState.config.type}`);
+      const repaymentAddress = toBytes32(this.repaymentAddress);
 
-      const tx = await targetSpokePool.fillRelay(relayData, repaymentChainId, repaymentAddressBytes32);
-      console.log(`📤 Fill transaction sent: ${tx.hash}`);
+      const tx = await targetChainState.spokePool.fillRelay(relayData, this.repaymentChainId, repaymentAddress);
+      console.log(`📤 Fill transaction sent on ${targetChainState.config.type}: ${tx.hash}`);
       
       const receipt = await tx.wait();
-      console.log(`✅ Relay fulfilled: ${tx.hash} (Block: ${receipt.blockNumber})`);
+      console.log(`✅ Relay fulfilled: ${tx.hash} (Block: ${receipt.blockNumber}) on ${targetChainState.config.type}`);
       
       // Mark as processed
       await this.redis.set(processedKey, 'true', { EX: 86400 });
@@ -243,14 +251,16 @@ class AcrossRelayer {
       await this.redis.publish('relay-fulfilled', JSON.stringify({ 
         depositId: depositId.toString(), 
         txHash: tx.hash,
-        sourceChain,
-        targetChain: targetChainLabel,
+        sourceChain: sourceChainState.config.type,
+        sourceChainId: sourceChainId,
+        targetChain: targetChainState.config.type,
+        targetChainId: targetChainId,
         sourceTransactionHash: event.transactionHash,
         blockNumber: receipt.blockNumber
       }));
       
     } catch (error) {
-      console.error('❌ Error fulfilling relay:', error);
+      console.error(`❌ Error fulfilling relay on ${targetChainState.config.type}:`, error);
     
       if (typeof error === 'object' && error !== null) {
         if ('code' in error && (error as any).code === 'CALL_EXCEPTION') {
@@ -265,43 +275,131 @@ class AcrossRelayer {
 
   async initializeFromRedis() {
     try {
-      const lastBlockA = await this.redis.get('lastProcessedBlock_A');
-      const lastBlockB = await this.redis.get('lastProcessedBlock_B');
-      
-      if (lastBlockA) {
-        this.lastProcessedBlockA = parseInt(lastBlockA);
-        console.log(`📊 Recovered Chain A from block: ${this.lastProcessedBlockA}`);
+      for (const [chainId, chainState] of this.chains) {
+        const lastBlockKey = `lastProcessedBlock_${chainId}`;
+        const lastBlock = await this.redis.get(lastBlockKey);
+        
+        if (lastBlock) {
+          chainState.lastProcessedBlock = parseInt(lastBlock);
+          console.log(`📊 Recovered ${chainState.config.type} from block: ${chainState.lastProcessedBlock}`);
+        }
       }
-      if (lastBlockB) {
-        this.lastProcessedBlockB = parseInt(lastBlockB);
-        console.log(`📊 Recovered Chain B from block: ${this.lastProcessedBlockB}`);
-      }
-      
     } catch (error) {
       console.error('❌ Error recovering from Redis:', error);
     }
   }
+
+  // Utility methods for runtime chain management
+  async addChain(chainId: string, chainConfig: ChainConfig) {
+    if (this.chains.has(chainId)) {
+      throw new Error(`Chain ${chainId} already exists`);
+    }
+
+    console.log(`🔧 Adding new chain ${chainConfig.type} (${chainId})`);
+    
+    const spokePoolAbi = [
+      "event FundsDeposited(bytes32 inputToken, bytes32 outputToken, uint256 inputAmount, uint256 outputAmount, uint256 indexed destinationChainId, uint256 indexed depositId, uint32 quoteTimestamp, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 indexed depositor, bytes32 recipient, bytes32 exclusiveRelayer, bytes message)",
+      "function fillRelay((bytes32,bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint32,uint32,bytes),uint256,bytes32) external"
+    ];
+
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+    const wallet = new ethers.Wallet(chainConfig.privateKey, provider);
+    const spokePool = new ethers.Contract(chainConfig.spokePoolAddress, spokePoolAbi, wallet);
+
+    const chainState: ChainState = {
+      provider,
+      wallet,
+      spokePool,
+      lastProcessedBlock: await provider.getBlockNumber(),
+      chainId,
+      config: chainConfig
+    };
+
+    this.chains.set(chainId, chainState);
+    console.log(`✅ Chain ${chainConfig.type} (${chainId}) added successfully`);
+  }
+
+  removeChain(chainId: string) {
+    if (!this.chains.has(chainId)) {
+      throw new Error(`Chain ${chainId} does not exist`);
+    }
+
+    const chainState = this.chains.get(chainId)!;
+    this.chains.delete(chainId);
+    console.log(`🗑️  Chain ${chainState.config.type} (${chainId}) removed`);
+  }
+
+  getChainStatus() {
+    const status = Array.from(this.chains.entries()).map(([chainId, chainState]) => ({
+      chainId,
+      name: chainState.config.type,
+      lastProcessedBlock: chainState.lastProcessedBlock,
+      spokePoolAddress: chainState.config.spokePoolAddress
+    }));
+
+    return {
+      totalChains: this.chains.size,
+      isRunning: this.isRunning,
+      chains: status
+    };
+  }
 }
 
+// Function to build chain configuration from environment variables
+function buildChainsConfig(): { [chainId: string]: ChainConfig } {
+  const chains: { [chainId: string]: ChainConfig } = {};
+  
+  if (process.env.CHAINS_CONFIG) {
+    try {
+      const chainsFromEnv = JSON.parse(process.env.CHAINS_CONFIG);
+      
+      // Replace environment variable placeholders with actual values
+      for (const [chainId, chainConfig] of Object.entries(chainsFromEnv as any)) {
+        const config = chainConfig as any;
+        chains[chainId] = {
+          rpc: process.env[config.rpc.replace('${', '').replace('}', '')] || config.rpc,
+          privateKey: process.env[config.privateKey.replace('${', '').replace('}', '')] || config.privateKey,
+          spokePoolAddress: process.env[config.spokePoolAddress.replace('${', '').replace('}', '')] || config.spokePoolAddress,
+          chainId: config.chainId,
+          type: config.type
+        };
+      }
+      
+      console.log(`🔧 Loaded ${Object.keys(chains).length} chains from CHAINS_CONFIG`);
+      return chains;
+    } catch (error) {
+      console.error('❌ Error parsing CHAINS_CONFIG:', error);
+      throw error;
+    }
+  }
+
+  
+  if (Object.keys(chains).length === 0) {
+    throw new Error('No chains configured. Please set up chain configuration in environment variables.');
+  }
+  
+  return chains;
+}
+
+// Build configuration from environment
 const config: RelayerConfig = {
-  chainA: {
-    rpc: process.env.CHAIN_A_RPC!,
-    privateKey: process.env.CHAIN_A_PRIVATE_KEY!,
-    spokePoolAddress: process.env.SPOKEPOOL_A_ADDRESS!,
-    chainId: parseInt(process.env.CHAIN_A_ID!)
-  },
-  chainB: {
-    rpc: process.env.CHAIN_B_RPC!,
-    privateKey: process.env.CHAIN_B_PRIVATE_KEY!,
-    spokePoolAddress: process.env.SPOKEPOOL_B_ADDRESS!,
-    chainId: parseInt(process.env.CHAIN_B_ID!)
-  },
+  chains: buildChainsConfig(),
   redisUrl: process.env.REDIS_URL!,
   pollingInterval: parseInt(process.env.POLLING_INTERVAL || '5000'),
-  blockRange: parseInt(process.env.BLOCK_RANGE || '100')
+  blockRange: parseInt(process.env.BLOCK_RANGE || '100'),
+  repaymentChainId: parseInt(process.env.REPAYMENT_CHAIN_ID || '1225280'),
+  repaymentAddress: process.env.REPAYMENT_ADDRESS || '0x333F13a6913553EE8C380173B16449d1F7AD0aF9'
 };
 
-const relayer = new AcrossRelayer(config);
+const relayer = new MultiChainAcrossRelayer(config);
+
+// Add some status logging
+setInterval(() => {
+  if (relayer.getChainStatus().isRunning) {
+    const status = relayer.getChainStatus();
+    console.log(`📊 Relayer Status: ${status.totalChains} chains active`);
+  }
+}, 60000); // Log every minute
 
 process.on('SIGINT', async () => {
   console.log('🛑 Received SIGINT, shutting down gracefully...');

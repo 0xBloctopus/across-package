@@ -23,157 +23,7 @@ def run(plan, args):
     plan.print("dataworker")
     plan.print(parsed_data.dataworker)
     
-    # weth_address = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeployWETH.s.sol",
-    #     "DeployWETH",
-    #     networks[0].rpc,
-    #     networks[0].private_key
-    # )
-    # plan.print("WETH contract at: " + weth_address)
-
-    # lp_token_factory_address = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeployLpTokenFactory.s.sol",
-    #     "DeployLpTokenFactory",
-    #     networks[0].rpc,
-    #     networks[0].private_key
-    # )
-
-    # plan.print("LpTokenFactory contract at: " + lp_token_factory_address)
-
-    # finder_address = deployer.deploy_contract(
-    #    plan,
-    #     "script/DeployFinder.s.sol",
-    #     "DeployFinder",
-    #     networks[0].rpc,
-    #     networks[0].private_key 
-    # )
-
-    # plan.print("Finder contract at: " + finder_address)
-
-    # adapter_address = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeployAdapter.s.sol",
-    #     "DeployAdapter",
-    #     networks[0].rpc,
-    #     networks[0].private_key
-    # )
-
-    # plan.print("Adapter contract at: " + adapter_address)
-
-    # hubpool_address = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeployHubPool.s.sol",
-    #     "DeployHubPool",
-    #     networks[0].rpc,
-    #     networks[0].private_key,
-    #     {
-    #         "LP_TOKEN_FACTORY": lp_token_factory_address,
-    #         "FINDER": finder_address,
-    #         "WETH": weth_address,
-    #     }
-    # )
-
-    # plan.print("Hubpool contract at: " + hubpool_address)
-
-    # spokepool_impl_address = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeploySpokePoolImpl.s.sol",
-    #     "DeploySpokePoolImpl",
-    #     networks[0].rpc,
-    #     networks[0].private_key,
-    #     {
-    #         "WETH": weth_address,
-    #         "HUBPOOL_ADDRESS": hubpool_address
-    #     }
-    # )
-    # plan.print("Spokepool impl output: " + spokepool_impl_address)
-
-    # spokepool_proxy = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeploySpokePoolProxy.s.sol",
-    #     "DeploySpokePoolProxy",
-    #     networks[0].rpc,
-    #     networks[0].private_key,
-    #     {
-    #         "SPOKEPOOL_IMPL": spokepool_impl_address.strip(),
-    #         "HUBPOOL_ADDRESS": hubpool_address
-    #     }
-    # )
-    # plan.print("Spoke pool proxy: " + spokepool_proxy)
-    
-    # weth_address_b = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeployWETH.s.sol",
-    #     "DeployWETH",
-    #     networks[1].rpc,
-    #     networks[1].private_key
-    # )
-    # plan.print("WETH contract at chain B: " + weth_address_b)
-
-    # adapter_address_b = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeployAdapter.s.sol",
-    #     "DeployAdapter",
-    #     networks[0].rpc,
-    #     networks[0].private_key
-    # )
-
-    # plan.print("Adapter contract at: " + adapter_address_b)
-
-    # spokepool_impl_address_b = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeploySpokePoolImpl.s.sol",
-    #     "DeploySpokePoolImpl",
-    #     networks[1].rpc,
-    #     networks[1].private_key,
-    #     {
-    #         "WETH": weth_address_b,
-    #         "HUBPOOL_ADDRESS": hubpool_address
-    #     }
-    # )
-    # plan.print("Spokepool impl output for chain B: " + spokepool_impl_address_b)
-
-    # spokepool_proxy_b = deployer.deploy_contract(
-    #     plan,
-    #     "script/DeploySpokePoolProxy.s.sol",
-    #     "DeploySpokePoolProxy",
-    #     networks[1].rpc,
-    #     networks[1].private_key,
-    #     {
-    #         "SPOKEPOOL_IMPL": spokepool_impl_address_b.strip(),
-    #         "HUBPOOL_ADDRESS": hubpool_address
-    #     }
-    # )
-    # plan.print("Spoke pool proxy for chain B: " + spokepool_proxy_b)
-    
-
-    # plan.print("Registering spokepool contract on chain a with HubPool...")
-    # registration_result_a = pool_registration.register_spoke_pools(
-    #     plan,
-    #     networks[0].rpc,
-    #     networks[0].private_key,
-    #     hubpool_address,
-    #     networks[0].chain_id,
-    #     adapter_address,
-    #     spokepool_proxy,
-    # )
-
-    # plan.print("Pool registration status: " + str(registration_result_a))
-
-    # plan.print("Registering spokepool contract on chain b with HubPool...")
-    # registration_result_b = pool_registration.register_spoke_pools(
-    #     plan,
-    #     networks[0].rpc,
-    #     networks[0].private_key,
-    #     hubpool_address,
-    #     networks[1].chain_id,
-    #     adapter_address_b,
-    #     spokepool_proxy_b,
-    # )
-
-    # plan.print("Pool registration status: " + str(registration_result_b))
+  
     redis_output = redis.run(
         plan,
         service_name = "redis",
@@ -181,17 +31,31 @@ def run(plan, args):
     )
     redis_url = "redis://{}:{}".format(redis_output.hostname, redis_output.port_number)
     plan.print("Redis running at " + redis_url)
+
+    chains_config = []
+    for network in parsed_data.networks:
+        chain_config = {
+            "chain_id": network.chain_id,
+            "type": network.type,  
+            "rpc": network.rpc,
+            "private_key": network.private_key,
+            "spokepool_address": network.spokepool_address
+        }
+        chains_config.append(chain_config)
     
-    plan.print("Deploying Relayer service...")
-    relayer = relayer_service.deploy_relayer_service(
+    relayer_config = {
+        "polling_interval": parsed_data.relayer.polling_interval,
+        "block_range": parsed_data.relayer.block_range,
+        "repayment_address": parsed_data.relayer.repayment_address
+        # "repayment_chain_id": parsed_data.networks[0].chain_id  # Using first network as repayment chain
+    }
+
+    plan.print("Deploying Multi-chain Relayer service...")
+    relayer = relayer_service.deploy_multi_chain_relayer_service(
         plan,
-        parsed_data.networks[0],
-        parsed_data.networks[1], 
-        parsed_data.relayer.repayment_address,
-        parsed_data.relayer.polling_interval,
-        parsed_data.relayer.block_range,
-        parsed_data.relayer.private_key,
-        redis_url
+        chains_config,
+        redis_url,
+        relayer_config
     )
     
     plan.print("Deploying DataWorker service...")
