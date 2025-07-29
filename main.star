@@ -58,13 +58,37 @@ def run(plan, args):
         relayer_config
     )
     
-    plan.print("Deploying DataWorker service...")
-    dataworker = dataworker_service.deploy_dataworker_service(
+    # plan.print("Deploying DataWorker service...")
+    # dataworker = dataworker_service.deploy_dataworker_service(
+    #     plan,
+    #     parsed_data.dataworker,
+    #     parsed_data.networks[0],
+    #     parsed_data.networks[1],
+    #     redis_url
+    # )
+
+    plan.print("Deploying Multi-chain DataWorker service...")
+    
+    # Prepare hubpool configuration for dataworker
+    hubpool_config = {
+        "rpc": parsed_data.dataworker.hubpool_rpc,
+        "private_key": parsed_data.dataworker.hubpool_private_key,
+        "address": parsed_data.dataworker.hubpool_address
+    }
+    
+    # Prepare dataworker-specific settings
+    dataworker_config = {
+        "polling_interval": getattr(parsed_data.dataworker, 'polling_interval', 10000),
+        "block_range": getattr(parsed_data.dataworker, 'block_range', 100),
+        "min_refund_volume": getattr(parsed_data.dataworker, 'min_refund_volume', "0")
+    }
+    
+    dataworker = dataworker_service.deploy_multi_chain_dataworker_service(
         plan,
-        parsed_data.dataworker,
-        parsed_data.networks[0],
-        parsed_data.networks[1],
-        redis_url
+        chains_config,  # Same chains_config as relayer (without private_key field)
+        hubpool_config,
+        redis_url,
+        dataworker_config
     )
 
     

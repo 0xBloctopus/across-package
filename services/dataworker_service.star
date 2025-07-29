@@ -1,21 +1,67 @@
-def deploy_dataworker_service(plan, hubpool_config, chain_a_config, chain_b_config, redis_url):
-    env_vars = {
-        "HUBPOOL_RPC": hubpool_config.hubpool_rpc,
-        "HUBPOOL_PRIVATE_KEY": hubpool_config.hubpool_private_key,
-        "HUBPOOL_ADDRESS": hubpool_config.hubpool_address,
-        "CHAIN_A_RPC": chain_a_config.rpc,
-        "CHAIN_A_ID": str(chain_a_config.chain_id),
-        "SPOKEPOOL_A_ADDRESS": chain_a_config.spokepool_address,
-        "CHAIN_B_RPC": chain_b_config.rpc,
-        "CHAIN_B_ID": str(chain_b_config.chain_id),
-        "SPOKEPOOL_B_ADDRESS": chain_b_config.spokepool_address,
-        "REDIS_URL": redis_url,
+def deploy_multi_chain_dataworker_service(plan, chains_config, hubpool_config, redis_url, dataworker_config={}):
+    """
+    Deploy a multi-chain dataworker service
+    
+    Args:
+        plan: Kurtosis plan
+        chains_config: List of chain configuration objects
+        hubpool_config: HubPool configuration (rpc, private_key, address)
+        redis_url: Redis connection URL
+        dataworker_config: Optional dataworker configuration (polling_interval, block_range, etc.)
+    
+    Example chains_config:
+    [
+        {
+            "chain_id": "8674520",
+            "name": "ethereum",
+            "rpc": "https://eth-rpc.com",
+            "spokepool_address": "0x..."
+        },
+        {
+            "chain_id": "1225280", 
+            "name": "arbitrum",
+            "rpc": "https://arb-rpc.com",
+            "spokepool_address": "0x..."
+        }
+    ]
+    
+    Example hubpool_config:
+    {
+        "rpc": "https://hubpool-rpc.com",
+        "private_key": "0x...",
+        "address": "0x..."
     }
+    """
+    env_vars = {}
+    
+    # Add HubPool configuration
+    env_vars["HUBPOOL_RPC"] = hubpool_config["rpc"]
+    env_vars["HUBPOOL_PRIVATE_KEY"] = hubpool_config["private_key"]
+    env_vars["HUBPOOL_ADDRESS"] = hubpool_config["address"]
+    
+    # Create a JSON string of chain configurations for the dataworker to parse
+    chains_json = json.encode({
+        chain["chain_id"]: {
+            "type": chain["type"],
+            "rpc": chain["rpc"],
+            "spokePoolAddress": chain["spokepool_address"],
+            "chainId": int(chain["chain_id"])
+        }
+        for chain in chains_config
+    })
+    
+    env_vars["CHAINS_CONFIG"] = chains_json
+    
+    # Add Redis and dataworker configuration
+    env_vars["REDIS_URL"] = redis_url
+    env_vars["POLLING_INTERVAL"] = str(dataworker_config.get("polling_interval", 10000))
+    env_vars["BLOCK_RANGE"] = str(dataworker_config.get("block_range", 100))
+    env_vars["MIN_REFUND_VOLUME"] = str(dataworker_config.get("min_refund_volume", "0"))
 
     dataworker_service = plan.add_service(
         name="across-dataworker",
         config=ServiceConfig(
-            image="raveenabhasin/across-mock-dataworker:0.0.1",  
+            image="raveenabhasin/across-mock-dataworker:0.0.3",  
             ports={},
             entrypoint=["node", "dist/index.js"],  
             cmd=[],
@@ -23,5 +69,4 @@ def deploy_dataworker_service(plan, hubpool_config, chain_a_config, chain_b_conf
         ),
         description="Deploys the Across Protocol dataworker service for cross-chain operations."
     )
-
     return dataworker_service

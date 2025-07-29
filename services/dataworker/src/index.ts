@@ -4,18 +4,25 @@ import { MerkleTree } from 'merkletreejs';
 import { BigNumberish } from "ethers";
 import 'dotenv/config'; 
 
+interface ChainConfig {
+  chainId: number;
+  type: string;
+  rpc: string;
+  spokePoolAddress: string;
+}
+
 interface DataWorkerConfig {
   hubPool: { rpc: string; privateKey: string; address: string };
-  chainA: { rpc: string; spokePoolAddress: string; chainId: number };
-  chainB: { rpc: string; spokePoolAddress: string; chainId: number };
+  chains: ChainConfig[];
   redisUrl: string;
   pollingInterval?: number;
   blockRange?: number;
-  minRefundVolume?: string; // Minimum volume before submitting refund bundle
+  minRefundVolume?: string;
 }
 
 interface RelayData {
-  chain: string;
+  chainId: number;
+  chainName: string;
   inputToken: string;
   outputToken: string;
   inputAmount: string;
@@ -55,30 +62,35 @@ interface PoolRebalanceLeaf {
   leafId: number;
   l1Tokens: string[];
 }
-class AcrossDataWorker {
+
+interface ChainWorker {
+  chainId: number;
+  type: string;
+  provider: ethers.JsonRpcProvider;
+  wallet: ethers.Wallet;
+  spokePool: ethers.Contract;
+  lastProcessedBlock: number;
+}
+
+class MultiChainAcrossDataWorker {
   private hubPoolProvider: ethers.JsonRpcProvider;
   private hubPoolWallet: ethers.Wallet;
   private hubPool: ethers.Contract;
-  private providerA: ethers.JsonRpcProvider;
-  private providerB: ethers.JsonRpcProvider;
-  private walletA: ethers.Wallet;
-  private walletB: ethers.Wallet;
-  private spokePoolA: ethers.Contract;
-  private spokePoolB: ethers.Contract;
+  private chainWorkers: Map<number, ChainWorker> = new Map();
   private redis: RedisClientType;
   private relayData: RelayData[] = [];
   private relayerRefunds: Map<string, RelayerRefund[]> = new Map();
   private relayerRefundLeaves: RelayerRefundLeaf[] = [];
   private poolRebalanceLeaves: PoolRebalanceLeaf[] = [];
   private pollingInterval: number;
-  private lastProcessedBlockA: number = 0;
-  private lastProcessedBlockB: number = 0;
   private isRunning: boolean = false;
   private blockRange: number;
   private minRefundVolume: bigint;
   private refundCounter: number = 0;
+  private config: DataWorkerConfig;
 
   constructor(config: DataWorkerConfig) {
+    this.config = config;
     this.hubPoolProvider = new ethers.JsonRpcProvider(config.hubPool.rpc);
     this.hubPoolWallet = new ethers.Wallet(config.hubPool.privateKey, this.hubPoolProvider);
     
@@ -87,106 +99,117 @@ class AcrossDataWorker {
       "function getCurrentTime() view returns (uint256)",
       "function liveness() view returns (uint32)",
       "function rootBundleProposal() view returns (bytes32 poolRebalanceRoot, bytes32 relayerRefundRoot, bytes32 slowRelayRoot, uint256 claimedBitMap, address proposer, uint8 unclaimedPoolRebalanceLeafCount, uint32 challengePeriodEndTimestamp)",
-      "function executeRootBundle(uint256 chainId, uint256 groupIndex, uint256[] memory bundleLpFees, int256[] memory netSendAmounts, int256[] memory runningBalances, uint8 leafId, address[] memory l1Tokens, bytes32[] memory proof)" ] ;
+      "function executeRootBundle(uint256 chainId, uint256 groupIndex, uint256[] memory bundleLpFees, int256[] memory netSendAmounts, int256[] memory runningBalances, uint8 leafId, address[] memory l1Tokens, bytes32[] memory proof)"
+    ];
     this.hubPool = new ethers.Contract(config.hubPool.address, hubPoolAbi, this.hubPoolWallet);
     
-    this.providerA = new ethers.JsonRpcProvider(config.chainA.rpc);
-    this.providerB = new ethers.JsonRpcProvider(config.chainB.rpc);
+    // Initialize chain workers
+    this.initializeChainWorkers();
+    
+    this.redis = createClient({ url: config.redisUrl });
+    this.pollingInterval = config.pollingInterval || 15000;
+    this.blockRange = config.blockRange || 100;
+    this.minRefundVolume = ethers.parseEther("0");
+  }
 
-    // Create wallets for each chain using the same private key as hubPool
-    this.walletA = new ethers.Wallet(config.hubPool.privateKey, this.providerA);
-    this.walletB = new ethers.Wallet(config.hubPool.privateKey, this.providerB);
-
+  private initializeChainWorkers() {
     const spokePoolAbi = [
       "event FilledRelay(bytes32 indexed inputToken, bytes32 indexed outputToken, uint256 inputAmount, uint256 outputAmount, uint256 repaymentChainId, uint256 indexed originChainId, uint256 indexed depositId, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 exclusiveRelayer, bytes32 indexed relayer, bytes32 depositor, bytes32 recipient, bytes32 messageHash, tuple(bytes32 updatedRecipient, bytes32 updatedMessageHash,uint256 updatedOutputAmount, uint8 fillType) relayExecutionInfo)",
       "function executeRelayerRefundLeaf(uint32 rootBundleId, tuple(uint256 amountToReturn, uint256 chainId, uint256[] refundAmounts, uint32 leafId, address l2TokenAddress, address[] refundAddresses), bytes32[] memory proof)",
     ];
-    
-    // Connect spokePool contracts to wallets (signers)
-    this.spokePoolA = new ethers.Contract(config.chainA.spokePoolAddress, spokePoolAbi, this.walletA);
-    this.spokePoolB = new ethers.Contract(config.chainB.spokePoolAddress, spokePoolAbi, this.walletB);
-    this.redis = createClient({ url: config.redisUrl });
-    this.pollingInterval = config.pollingInterval || 15000;
-    this.blockRange = config.blockRange || 100;
-    this.minRefundVolume = ethers.parseEther("0"); // Default 1000 ETH equivalent
+
+    for (const chainConfig of this.config.chains) {
+      const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+      const wallet = new ethers.Wallet(this.config.hubPool.privateKey, provider);
+      const spokePool = new ethers.Contract(chainConfig.spokePoolAddress, spokePoolAbi, wallet);
+
+      const chainWorker: ChainWorker = {
+        chainId: chainConfig.chainId,
+        type: chainConfig.type,
+        provider,
+        wallet,
+        spokePool,
+        lastProcessedBlock: 0
+      };
+
+      this.chainWorkers.set(chainConfig.chainId, chainWorker);
+      console.log(`✅ Initialized chain worker for ${chainConfig.type} (Chain ID: ${chainConfig.chainId})`);
+    }
   }
 
   async start() {
     await this.redis.connect();
-    // Load relayer refund leaves from Redis if they exist
-    const leavesJson = await this.redis.get('lastRelayerRefundLeaves');
-    if (leavesJson) {
-      this.relayerRefundLeaves = JSON.parse(leavesJson);
-      console.log('Loaded relayer refund leaves from Redis:', this.relayerRefundLeaves.length);
-    }
-    const poolLeavesJson = await this.redis.get('lastPoolRebalanceLeaves');
-    if (poolLeavesJson) {
-      this.poolRebalanceLeaves = JSON.parse(poolLeavesJson);
-      console.log('Loaded pool rebalance leaves from Redis:', this.poolRebalanceLeaves.length);
-    }
-    console.log('🚀 DataWorker service started');
-    // Log the address of the proposer and the private key
-    try {
-      const bundleProposal = await this.hubPool.rootBundleProposal();
-      const proposer = bundleProposal.proposer;
-      console.log('Proposer address from hubPool.rootBundleProposal():', proposer);
-    } catch (err: any) {
-      if (err.code === 'BAD_DATA' || err.value === '0x') {
-        console.log('⚠️ HubPool contract not found at address:', this.hubPool.target);
-        console.log('📝 This is expected if contracts are not deployed yet.');
-      } else {
-        console.warn('Could not fetch proposer from hubPool:', err);
-      }
-    }
-    console.log('Private key from config:', config.hubPool.privateKey);
-    // Log the address derived from the private key
-    // try {
-    //   const derivedWallet = new ethers.Wallet(config.hubPool.privateKey);
-    //   console.log('Address derived from private key:', derivedWallet.address);
-    // } catch (err) {
-    //   console.warn('Could not derive address from private key:', err);
-    // }
-    // Initialize last processed blocks
-    this.lastProcessedBlockA = await this.providerA.getBlockNumber();
-    this.lastProcessedBlockB = await this.providerB.getBlockNumber();
+    
+    // Load state from Redis
+    await this.loadStateFromRedis();
+    
+    console.log(`🚀 Multi-chain DataWorker service started for ${this.chainWorkers.size} chains`);
+    
+    // Initialize last processed blocks for all chains
+    await this.initializeLastProcessedBlocks();
+    
     this.isRunning = true;
-    // Start polling for events
+    
+    // Start polling for all chains
     this.startPolling();
     // Start bundle proposal monitoring
     this.startBundleMonitoring();
   }
 
+  private async loadStateFromRedis() {
+    // Load relayer refund leaves
+    const leavesJson = await this.redis.get('lastRelayerRefundLeaves');
+    if (leavesJson) {
+      this.relayerRefundLeaves = JSON.parse(leavesJson);
+      console.log('Loaded relayer refund leaves from Redis:', this.relayerRefundLeaves.length);
+    }
+    
+    // Load pool rebalance leaves
+    const poolLeavesJson = await this.redis.get('lastPoolRebalanceLeaves');
+    if (poolLeavesJson) {
+      this.poolRebalanceLeaves = JSON.parse(poolLeavesJson);
+      console.log('Loaded pool rebalance leaves from Redis:', this.poolRebalanceLeaves.length);
+    }
+  }
+
+  private async initializeLastProcessedBlocks() {
+    for (const [chainId, worker] of this.chainWorkers) {
+      // Try to load from Redis first
+      const savedBlock = await this.redis.get(`lastProcessedBlock_${chainId}`);
+      if (savedBlock) {
+        worker.lastProcessedBlock = parseInt(savedBlock);
+        console.log(`📚 Loaded last processed block for chain ${chainId}: ${worker.lastProcessedBlock}`);
+      } else {
+        // Initialize to current block
+        worker.lastProcessedBlock = await worker.provider.getBlockNumber();
+        console.log(`🔄 Initialized last processed block for chain ${chainId}: ${worker.lastProcessedBlock}`);
+      }
+    }
+  }
+
   private async startPolling() {
-    const pollChainA = async () => {
+    // Create polling function for each chain
+    for (const [chainId, worker] of this.chainWorkers) {
+      this.startChainPolling(worker);
+    }
+  }
+
+  private startChainPolling(worker: ChainWorker) {
+    const pollChain = async () => {
       if (!this.isRunning) return;
       
       try {
-        await this.pollForEvents('A', this.spokePoolA, this.providerA);
+        await this.pollForEvents(worker);
       } catch (error) {
-        console.error('❌ Error polling chain A:', error);
+        console.error(`❌ Error polling chain ${worker.type} (${worker.chainId}):`, error);
       }
       
       if (this.isRunning) {
-        setTimeout(pollChainA, this.pollingInterval);
+        setTimeout(pollChain, this.pollingInterval);
       }
     };
 
-    const pollChainB = async () => {
-      if (!this.isRunning) return;
-      
-      try {
-        await this.pollForEvents('B', this.spokePoolB, this.providerB);
-      } catch (error) {
-        console.error('❌ Error polling chain B:', error);
-      }
-      
-      if (this.isRunning) {
-        setTimeout(pollChainB, this.pollingInterval);
-      }
-    };
-
-    pollChainA();
-    pollChainB();
+    pollChain();
   }
 
   private async startBundleMonitoring() {
@@ -200,29 +223,24 @@ class AcrossDataWorker {
       }
       
       if (this.isRunning) {
-        setTimeout(monitorBundle, this.pollingInterval * 2); // Check less frequently
+        setTimeout(monitorBundle, this.pollingInterval * 2);
       }
     };
 
     monitorBundle();
   }
 
-  private async pollForEvents(
-    chainLabel: string, 
-    spokePool: ethers.Contract, 
-    provider: ethers.JsonRpcProvider
-  ) {
-    const currentBlock = await provider.getBlockNumber();
-    const lastProcessedBlock = chainLabel === 'A' ? this.lastProcessedBlockA : this.lastProcessedBlockB;
+  private async pollForEvents(worker: ChainWorker) {
+    const currentBlock = await worker.provider.getBlockNumber();
     
-    if (currentBlock <= lastProcessedBlock) {
+    if (currentBlock <= worker.lastProcessedBlock) {
       return;
     }
 
-    const fromBlock = lastProcessedBlock + 1;
+    const fromBlock = worker.lastProcessedBlock + 1;
     const toBlock = Math.min(fromBlock + this.blockRange - 1, currentBlock);
 
-    console.log(`🔍 Polling chain ${chainLabel} from block ${fromBlock} to ${toBlock}`);
+    console.log(`🔍 Polling chain ${worker.type} (${worker.chainId}) from block ${fromBlock} to ${toBlock}`);
     
     try {
       const eventTopic = '0x44b559f101f8fbcc8a0ea43fa91a05a729a5ea6e14a7c75aa750374690137208'; // FilledRelay
@@ -243,13 +261,13 @@ class AcrossDataWorker {
       ];
 
       const filter = {
-        address: spokePool.target,
+        address: worker.spokePool.target,
         fromBlock,
         toBlock,
         topics: [eventTopic]
       };
 
-      const logs = await provider.getLogs(filter);
+      const logs = await worker.provider.getLogs(filter);
       const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     
       for (const log of logs) {
@@ -257,7 +275,8 @@ class AcrossDataWorker {
           const decoded = abiCoder.decode(nonIndexedTypes, log.data);
           
           const relayEntry: RelayData = {
-            chain: chainLabel,
+            chainId: worker.chainId,
+            chainName: worker.type,
             inputToken: decoded[0].toString(),
             outputToken: decoded[1].toString(),
             inputAmount: decoded[2].toString(),
@@ -270,29 +289,26 @@ class AcrossDataWorker {
             blockNumber: log.blockNumber,
             transactionHash: log.transactionHash
           };
-          console.log('✅ FilledRelay log decoded:', relayEntry);
+          
+          console.log(`✅ FilledRelay event on ${worker.type} (${worker.chainId}):`, relayEntry);
         
           this.relayData.push(relayEntry);
           
           // Process refund for this relay
           await this.processRelayForRefund(relayEntry);
           
-          console.log(`✅ Processed FilledRelay on chain ${chainLabel}, deposit ${relayEntry.depositId}`);
+          console.log(`✅ Processed FilledRelay on chain ${worker.type}, deposit ${relayEntry.depositId}`);
         } catch (err) {
           console.warn('❌ Failed to decode log:', err);
         }
       }
 
       // Update last processed block
-      if (chainLabel === 'A') {
-        this.lastProcessedBlockA = toBlock;
-      } else {
-        this.lastProcessedBlockB = toBlock;
-      }
-
-      await this.redis.set(`lastProcessedBlock_${chainLabel}`, toBlock.toString());
+      worker.lastProcessedBlock = toBlock;
+      await this.redis.set(`lastProcessedBlock_${worker.chainId}`, toBlock.toString());
+      
     } catch (error) {
-      console.error(`❌ Error querying events for chain ${chainLabel}:`, error);
+      console.error(`❌ Error querying events for chain ${worker.type} (${worker.chainId}):`, error);
     }
   }
 
@@ -325,23 +341,30 @@ class AcrossDataWorker {
     console.log(`💰 Queued refund for relayer ${relayerAddress}: ${ethers.formatEther(refund.amount)} tokens on chain ${repaymentChainId}`);
   }
 
-  private async shouldProposeBundle(): Promise<boolean> {
-    // Check if we have enough volume to justify proposing a bundle
-    let totalRefundVolume = 0n;
+  private async buildPoolRebalanceRoot(): Promise<string> {
+    // Create minimal pool rebalance leaves for each chain
+    const chainIds = Array.from(this.chainWorkers.keys());
+    this.poolRebalanceLeaves = [];
     
-    for (const [relayer, refunds] of this.relayerRefunds) {
-      for (const refund of refunds) {
-        totalRefundVolume += BigInt(refund.amount);
-      }
+    for (let i = 0; i < chainIds.length; i++) {
+      const leaf = {
+        chainId: chainIds[i],
+        bundleLpFees: [],
+        netSendAmounts: [],
+        runningBalances: [],
+        groupIndex: 0,
+        leafId: i,
+        l1Tokens: []
+      };
+      this.poolRebalanceLeaves.push(leaf);
     }
-
-    console.log(`📊 Total refund volume: ${ethers.formatEther(totalRefundVolume)} ETH equivalent`);
     
-    return totalRefundVolume >= this.minRefundVolume;
-  }
-
-  bytes32ToAddress(bytes32: any) {
-    return ethers.getAddress('0x' + bytes32.slice(-40));
+    if (this.poolRebalanceLeaves.length === 0) {
+      return ethers.ZeroHash;
+    }
+    
+    const merkleTree = this.createPoolRebalanceMerkleTree(this.poolRebalanceLeaves);
+    return merkleTree.getHexRoot();
   }
 
   private async buildRelayerRefundRoot(): Promise<string> {
@@ -385,10 +408,6 @@ class AcrossDataWorker {
           refundAddresses: refundAddresses
         };
   
-        console.log('--- Refund Leaf ---');
-        console.log('Leaf:', refundLeaf);
-        console.log('-------------------');
-  
         this.relayerRefundLeaves.push(refundLeaf);
         leaves.push(refundLeaf); 
       }
@@ -401,60 +420,38 @@ class AcrossDataWorker {
     const merkleTree = this.createRelayerRefundMerkleTree(leaves);
     return merkleTree.getHexRoot();
   }
-  
 
   private async processRelayData() {
-    // Only propose a bundle if there is at least one FilledRelay event AND no active bundle proposal
-    // const bundleProposal = await this.hubPool.rootBundleProposal();
-    // const hasActiveProposal = bundleProposal.unclaimedPoolRebalanceLeafCount && bundleProposal.unclaimedPoolRebalanceLeafCount > 0n;
-    // if (this.relayData.length === 0 || hasActiveProposal) {
-    //   if (this.relayData.length === 0) {
-    //     console.log('⏳ No FilledRelay events observed, not proposing bundle yet.');
-    //   }
-    //   if (hasActiveProposal) {
-    //     console.log('⏳ Active bundle proposal exists, not proposing new bundle.');
-    //   }
-    //   return;
-    // }
-    
     console.log('🏗️  Building bundle for proposal...');
 
     try {
-      const currentBlockA = await this.providerA.getBlockNumber();
-      const currentBlockB = await this.providerB.getBlockNumber();
-      
-      const bundleEvaluationBlockNumbers = [currentBlockA, currentBlockB];
+      // Get current blocks for all chains
+      const bundleEvaluationBlockNumbers = [];
+      for (const [chainId, worker] of this.chainWorkers) {
+        const currentBlock = await worker.provider.getBlockNumber();
+        bundleEvaluationBlockNumbers.push(currentBlock);
+      }
       
       const poolRebalanceRoot = await this.buildPoolRebalanceRoot();
       const relayerRefundRoot = await this.buildRelayerRefundRoot();
-      const slowRelayRoot = ethers.ZeroHash; // Not handling slow relays
+      const slowRelayRoot = ethers.ZeroHash;
       
-      console.log('📄 Refund Bundle:');
+      console.log('📄 Multi-chain Bundle:');
       console.log('  - Pool Rebalance root:', poolRebalanceRoot);
       console.log('  - Relayer refund root:', relayerRefundRoot);
       console.log('  - Total refund leaves:', this.relayerRefundLeaves.length);
       console.log('  - Evaluation blocks:', bundleEvaluationBlockNumbers);
-      
-      // const tx = await this.hubPool.proposeRootBundle(
-      //   bundleEvaluationBlockNumbers,
-      //   2, 
-      //   poolRebalanceRoot, 
-      //   relayerRefundRoot,
-      //   ethers.ZeroHash // No slow relay root
-      // );
-      
-      // await tx.wait();
-      // console.log(`✅ Relayer refund bundle proposed: ${tx.hash}`);
+      console.log('  - Chains covered:', Array.from(this.chainWorkers.keys()));
       
       // Store bundle info in Redis
       await this.redis.set('lastBundleProposal', JSON.stringify({
-        // transactionHash: tx.hash,
         timestamp: Date.now(),
         relayerRefundRoot,
-        refundLeafCount: this.relayerRefundLeaves.length
+        refundLeafCount: this.relayerRefundLeaves.length,
+        chainsIncluded: Array.from(this.chainWorkers.keys())
       }));
       
-      // Persist relayer refund leaves in Redis
+      // Persist leaves in Redis
       await this.redis.set('lastRelayerRefundLeaves', JSON.stringify(this.relayerRefundLeaves));
       await this.redis.set('lastPoolRebalanceLeaves', JSON.stringify(this.poolRebalanceLeaves));
  
@@ -469,46 +466,34 @@ class AcrossDataWorker {
 
   private async checkAndExecuteBundle() {
     try {
-      console.log("relay data length", this.relayData.length)
-      // If there is new relay data, process it first and return
+      console.log("Relay data length:", this.relayData.length);
+      
       if (this.relayData.length > 0) {
         await this.processRelayData();
         return;
       }
       
-      // Check if HubPool contract exists and is accessible
       try {
         const bundleProposal = await this.hubPool.rootBundleProposal();
-        console.log("bundle proposal", bundleProposal);
-        // If there is no bundle proposal, propose a new one
-        // if (!bundleProposal.challengePeriodEndTimestamp || bundleProposal.challengePeriodEndTimestamp === 0n) {
+        
         if (bundleProposal.unclaimedPoolRebalanceLeafCount == 0n) {
           console.log('No bundle proposal exists, proposing new bundle...');
           await this.processRelayData();
           return;
         }
-        const currentTime = await this.hubPool.getCurrentTime();
-        const liveness = await this.hubPool.liveness();
-       
         
-        // Check if challenge period has passed
+        const currentTime = await this.hubPool.getCurrentTime();
+        
         if (bundleProposal.challengePeriodEndTimestamp > 0n && 
             currentTime >= bundleProposal.challengePeriodEndTimestamp) {
           
-          console.log('⏰ Challenge period ended, bundle can be executed');
+          console.log('⏰ Challenge period ended, executing bundle on all chains');
           
-          // In a full implementation, you would:
-          // 1. Generate merkle proofs for each refund leaf
-          // 2. Execute refunds on spoke pools
-          // 3. Execute pool rebalancing
           await this.executeRootBundleOnHubPool(); 
-          // Execute refunds on spoke pools
-          await this.executeRefundsOnSpokePool(this.spokePoolA, parseInt(config.chainA.chainId.toString()));
-          await this.executeRefundsOnSpokePool(this.spokePoolB, parseInt(config.chainB.chainId.toString()));
+          await this.executeRefundsOnAllChains();
           
-          console.log('✅ Bundle execution completed');
+          console.log('✅ Multi-chain bundle execution completed');
           
-          // Trigger new bundle proposal if we have more data
           if (this.relayData.length > 0) {
             await this.processRelayData();
           }
@@ -517,13 +502,11 @@ class AcrossDataWorker {
           console.log(`⏳ Challenge period active, ${timeRemaining} seconds remaining`);
         }
       } catch (hubPoolError: any) {
-        // Handle case where HubPool contract doesn't exist or is not accessible
         if (hubPoolError.code === 'BAD_DATA' || hubPoolError.value === '0x') {
-          console.log('⚠️ HubPool contract not found or not accessible at address:', this.hubPool.target);
-          console.log('📝 This is expected if contracts are not deployed yet. Dataworker will continue monitoring for relay events.');
+          console.log('⚠️ HubPool contract not accessible, continuing to monitor relay events...');
           return;
         }
-        throw hubPoolError; // Re-throw other errors
+        throw hubPoolError;
       }
     } catch (error) {
       console.error('❌ Error checking bundle status:', error);
@@ -531,45 +514,37 @@ class AcrossDataWorker {
   }
 
   private async executeRootBundleOnHubPool() {
-    console.log('🏗️ Executing root bundle on HubPool...');
+    console.log('🏗️ Executing root bundle on HubPool for all chains...');
     
     try {
       const bundleProposal = await this.hubPool.rootBundleProposal();
-      console.log('Bundle proposal pool rebalance root:', bundleProposal.poolRebalanceRoot);
-      
-      const chainIds = [config.chainA.chainId, config.chainB.chainId];
+      const chainIds = Array.from(this.chainWorkers.keys());
       const poolRebalanceLeaves = [];
       
       for (let i = 0; i < chainIds.length; i++) {
         const leaf = {
           chainId: chainIds[i],
-          bundleLpFees: [], // Empty for relayer refunds only
-          netSendAmounts: [], // Empty for relayer refunds only  
-          runningBalances: [], // Empty for relayer refunds only
+          bundleLpFees: [],
+          netSendAmounts: [],
+          runningBalances: [],
           groupIndex: 0,
-          leafId: i, // Use chain index as leaf ID
-          l1Tokens: [] // Empty for relayer refunds only
+          leafId: i,
+          l1Tokens: []
         };
         poolRebalanceLeaves.push(leaf);
       }
-      console.log("poolooooo: ", poolRebalanceLeaves); 
-      // Generate merkle tree from the leaves
-      const merkleTree = this.createPoolRebalanceMerkleTree(poolRebalanceLeaves);
-      console.log('Generated pool rebalance root:', merkleTree.getHexRoot());
-      console.log('Expected pool rebalance root:', bundleProposal.poolRebalanceRoot);
       
-      // Verify the roots match
+      const merkleTree = this.createPoolRebalanceMerkleTree(poolRebalanceLeaves);
+      
       if (merkleTree.getHexRoot() !== bundleProposal.poolRebalanceRoot) {
         throw new Error(`Pool rebalance root mismatch. Generated: ${merkleTree.getHexRoot()}, Expected: ${bundleProposal.poolRebalanceRoot}`);
       }
       
-      // Execute each leaf
+      // Execute for each chain
       for (const leaf of poolRebalanceLeaves) {
         const proof = this.generatePoolRebalanceProofForLeaf(merkleTree, leaf);
         try {
           console.log(`Executing root bundle for chain ${leaf.chainId}...`);
-          console.log('Leaf data:', leaf);
-          console.log('Proof:', proof);
 
           const tx = await this.hubPool.executeRootBundle(
             leaf.chainId,
@@ -584,24 +559,140 @@ class AcrossDataWorker {
           await tx.wait();
           console.log(`✅ Root bundle executed for chain ${leaf.chainId}: ${tx.hash}`);
         } catch (error: any) {
-          // If error is 'Already claimed', log and continue
           if (error && error.reason && error.reason.includes('Already claimed')) {
             console.warn(`⚠️ Leaf for chain ${leaf.chainId} already claimed, skipping.`);
             continue;
           }
-          // Otherwise, rethrow
           console.error(`❌ Error executing root bundle for chain ${leaf.chainId}:`, error);
         }
       }
-      
-      console.log('✅ All root bundles executed, roots relayed to spoke pools');
       
     } catch (error) {
       console.error('❌ Error executing root bundle:', error);
       throw error;
     }
   }
-  
+
+  private async executeRefundsOnAllChains() {
+    console.log('💸 Executing refunds on all chains...');
+    
+    for (const [chainId, worker] of this.chainWorkers) {
+      try {
+        await this.executeRefundsOnSpokePool(worker.spokePool, chainId);
+        console.log(`✅ Completed refund execution on ${worker.type} (${chainId})`);
+      } catch (error) {
+        console.error(`❌ Failed to execute refunds on chain ${chainId}:`, error);
+      }
+    }
+    
+    // Clear stored leaves after all executions
+    await this.redis.del('lastRelayerRefundLeaves');
+  }
+
+  async executeRefundsOnSpokePool(spokePool: ethers.Contract, chainId: number) {
+    // Get chain name for logging
+    const chainName = this.chainWorkers.get(chainId)?.type || `Chain-${chainId}`;
+    
+    let rootBundleId = 0;
+    try {
+      let found = true;
+      while (found) {
+        try {
+          await spokePool.rootBundles(rootBundleId);
+          rootBundleId++;
+        } catch (err) {
+          found = false;
+        }
+      }
+      if (rootBundleId > 0) rootBundleId = rootBundleId - 1;
+    } catch (err) {
+      rootBundleId = 0;
+    }
+    console.log(`Using rootBundleId ${rootBundleId} for ${chainName} (${chainId})`);
+
+    const chainRefunds = this.relayerRefundLeaves.filter(leaf => leaf.chainId === chainId);
+    
+    if (chainRefunds.length === 0) {
+      console.log(`No refunds to execute on ${chainName} (${chainId})`);
+      return;
+    }
+    
+    console.log(`💸 Executing ${chainRefunds.length} refund leaves on ${chainName} (${chainId})`);
+    
+    const leaves = this.relayerRefundLeaves.map(leaf => {
+      const leafData = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
+        [
+          leaf.amountToReturn,
+          leaf.chainId,
+          leaf.refundAmounts,
+          leaf.leafId,
+          leaf.l2TokenAddress,
+          leaf.refundAddresses
+        ]
+      );
+      return ethers.keccak256(leafData);
+    });
+    
+    const merkleTree = new MerkleTree(leaves, ethers.keccak256, { sortPairs: true });
+    
+    for (const refundLeaf of chainRefunds) {
+      try {
+        const leafData = ethers.AbiCoder.defaultAbiCoder().encode(
+          ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
+          [
+            refundLeaf.amountToReturn,
+            refundLeaf.chainId,
+            refundLeaf.refundAmounts,
+            refundLeaf.leafId,
+            refundLeaf.l2TokenAddress,
+            refundLeaf.refundAddresses
+          ]
+        );
+        
+        const leafHash = ethers.keccak256(leafData);
+        const proof = merkleTree.getHexProof(leafHash);
+        
+        if (refundLeaf.refundAmounts.length !== refundLeaf.refundAddresses.length) {
+          throw new Error(`Mismatch in refundAmounts and refundAddresses for leaf ${refundLeaf.leafId}`);
+        }
+        
+        const refundAmounts = refundLeaf.refundAmounts.map(amount => 
+          typeof amount === 'string' ? BigInt(amount) : amount
+        );
+        
+        const tx = await spokePool.executeRelayerRefundLeaf(
+          1, // FIXME: Hardcoding only for testing
+          {
+            amountToReturn: BigInt(refundLeaf.amountToReturn),
+            chainId: refundLeaf.chainId,
+            refundAmounts: refundAmounts,
+            leafId: refundLeaf.leafId,
+            l2TokenAddress: refundLeaf.l2TokenAddress,
+            refundAddresses: refundLeaf.refundAddresses
+          },
+          proof
+        );
+        
+        await tx.wait();
+        console.log(`✅ Executed refund leaf ${refundLeaf.leafId} on ${chainName} (${chainId}): ${tx.hash}`);
+        
+        // Log individual refunds
+        for (let i = 0; i < refundLeaf.refundAddresses.length; i++) {
+          console.log(`  - Refunded ${ethers.formatEther(refundLeaf.refundAmounts[i])} to ${refundLeaf.refundAddresses[i]}`);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Failed to execute refund leaf ${refundLeaf.leafId} on ${chainName}:`, error);
+      }
+    }
+  }
+
+  // Helper methods (unchanged from original)
+  bytes32ToAddress(bytes32: any) {
+    return ethers.getAddress('0x' + bytes32.slice(-40));
+  }
+
   private createPoolRebalanceMerkleTree(leaves: any[]): MerkleTree {
     const leafHashes = leaves.map(leaf => this.hashPoolRebalanceLeaf(leaf));
     return new MerkleTree(leafHashes, ethers.keccak256, { sortPairs: true });
@@ -633,47 +724,12 @@ class AcrossDataWorker {
       [cleanedLeaf]
     );
     
-  
-    const hash = ethers.keccak256(encoded);
-  
-    // console.log("Leaf struct:", cleanedLeaf);
-    // console.log("Encoded:", encoded);
-    console.log("Leaf hash:", hash);
-  
-    return hash;
+    return ethers.keccak256(encoded);
   }
-  
   
   private generatePoolRebalanceProofForLeaf(merkleTree: MerkleTree, leaf: any): string[] {
     const leafHash = this.hashPoolRebalanceLeaf(leaf);
     return merkleTree.getHexProof(leafHash);
-  }
-  
-  private async buildPoolRebalanceRoot(): Promise<string> {
-    // Create minimal pool rebalance leaves for each chain to enable root relay
-    const chainIds = [config.chainA.chainId, config.chainB.chainId];
-    this.poolRebalanceLeaves = [];
-    
-    for (let i = 0; i < chainIds.length; i++) {
-      const leaf = {
-        chainId: chainIds[i],
-        bundleLpFees: [], // empty for refund-only bundles
-        netSendAmounts: [], // empty for refund-only bundles
-        runningBalances: [], // empty for refund-only bundles
-        groupIndex: 0, // groupIndex 0 triggers root relay
-        leafId: i, // leafId
-        l1Tokens: [] // empty for refund-only bundles
-      };
-      this.poolRebalanceLeaves.push(leaf);
-      console.log('PoolRebalanceLeaf:', leaf);
-    }
-    
-    if (this.poolRebalanceLeaves.length === 0) {
-      return ethers.ZeroHash;
-    }
-    
-    const merkleTree = this.createPoolRebalanceMerkleTree(this.poolRebalanceLeaves);
-    return merkleTree.getHexRoot();
   }
 
   private hashRelayerRefundLeaf(leaf: RelayerRefundLeaf): string {
@@ -700,166 +756,65 @@ class AcrossDataWorker {
       [cleanedLeaf]
     );
   
-    const hash = ethers.keccak256(encoded);
-    console.log("RelayerRefundLeaf hash:", hash);
-  
-    return hash;
+    return ethers.keccak256(encoded);
   }
-
 
   private createRelayerRefundMerkleTree(leaves: any[]): MerkleTree {
     const leafHashes = leaves.map(leaf => this.hashRelayerRefundLeaf(leaf));
     return new MerkleTree(leafHashes, ethers.keccak256, { sortPairs: true });
   }
-  
-
-  async executeRefundsOnSpokePool(spokePool: ethers.Contract, chainId: number) {
-    // Fetch the latest rootBundleId from the SpokePool
-    let rootBundleId = 0;
-    try {
-      // Try to get the length of rootBundles array by incrementing until revert
-      // (If SpokePool exposes a length() or rootBundlesLength() view, use that instead)
-      let found = true;
-      while (found) {
-        try {
-          // Try to fetch the next rootBundle
-          await spokePool.rootBundles(rootBundleId);
-          rootBundleId++;
-        } catch (err) {
-          found = false;
-        }
-      }
-      if (rootBundleId > 0) rootBundleId = rootBundleId - 1;
-    } catch (err) {
-      rootBundleId = 0;
-    }
-    console.log(`Using rootBundleId ${rootBundleId} for chain ${chainId}`);
-
-    // Filter refund leaves for this chain
-    const chainRefunds = this.relayerRefundLeaves.filter(leaf => leaf.chainId === chainId);
-    
-    if (chainRefunds.length === 0) {
-      console.log(`No refunds to execute on chain ${chainId}`);
-      return;
-    }
-    
-    console.log(`💸 Executing ${chainRefunds.length} refund leaves on chain ${chainId}`);
-    
-    // Build merkle tree for proof generation
-    const leaves = this.relayerRefundLeaves.map(leaf => {
-      const leafData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
-        [
-          leaf.amountToReturn,
-          leaf.chainId,
-          leaf.refundAmounts,
-          leaf.leafId,
-          leaf.l2TokenAddress,
-          leaf.refundAddresses
-        ]
-      );
-      return ethers.keccak256(leafData);
-    });
-    console.log("leaves", leaves) 
-    const merkleTree = new MerkleTree(leaves, ethers.keccak256, { sortPairs: true });
-    
-    for (const refundLeaf of chainRefunds) {
-      try {
-        console.log("refund leaf data", refundLeaf)
-        // Generate merkle proof
-        const leafData = ethers.AbiCoder.defaultAbiCoder().encode(
-          ['uint256', 'uint256', 'uint256[]', 'uint32', 'address', 'address[]'],
-          [
-            refundLeaf.amountToReturn,
-            refundLeaf.chainId,
-            refundLeaf.refundAmounts,
-            refundLeaf.leafId,
-            refundLeaf.l2TokenAddress,
-            refundLeaf.refundAddresses
-          ]
-        );
-        console.log("refund leaf hashed data: ", leafData);
-        const leafHash = ethers.keccak256(leafData);
-        console.log("Leaf hash", leafHash);
-        const proof = merkleTree.getHexProof(leafHash);
-        console.log('Calling executeRelayerRefundLeaf with:', {
-          leafId: refundLeaf.leafId,
-          proof,
-          tuple: [
-            refundLeaf.amountToReturn,
-            refundLeaf.chainId,
-            refundLeaf.refundAmounts,
-            refundLeaf.leafId,
-            refundLeaf.l2TokenAddress,
-            refundLeaf.refundAddresses
-          ]
-        });
-        if (refundLeaf.refundAmounts.length !== refundLeaf.refundAddresses.length) {
-          throw new Error(`Mismatch in refundAmounts (${refundLeaf.refundAmounts.length}) and refundAddresses (${refundLeaf.refundAddresses.length})`);
-        }
-        console.log('Refund amounts:', refundLeaf.refundAmounts);
-        console.log('Refund addresses:', refundLeaf.refundAddresses);
-        const refundAmounts = refundLeaf.refundAmounts.map(amount => 
-          typeof amount === 'string' ? BigInt(amount) : amount
-        );
-        const tx = await spokePool.executeRelayerRefundLeaf(
-          1, //FIXME: Hardcoding only for testing purpose
-          {
-            amountToReturn: BigInt(refundLeaf.amountToReturn),
-            chainId: refundLeaf.chainId,
-            refundAmounts: refundAmounts,
-            leafId: refundLeaf.leafId,
-            l2TokenAddress: refundLeaf.l2TokenAddress,
-            refundAddresses: refundLeaf.refundAddresses
-          },
-          proof
-        );
-        
-        await tx.wait();
-        console.log(`✅ Executed refund leaf ${refundLeaf.leafId} on chain ${chainId}: ${tx.hash}`);
-        
-        // Log individual refunds
-        for (let i = 0; i < refundLeaf.refundAddresses.length; i++) {
-          console.log(`  - Refunded ${ethers.formatEther(refundLeaf.refundAmounts[i])} to ${refundLeaf.refundAddresses[i]}`);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Failed to execute refund leaf ${refundLeaf.leafId}:`, error);
-      }
-    }
-    // After all refunds executed, clear the stored leaves
-    await this.redis.del('lastRelayerRefundLeaves');
-  }
 
   async stop() {
     this.isRunning = false;
     await this.redis.disconnect();
-    console.log('🛑 DataWorker stopped');
+    console.log('🛑 Multi-chain DataWorker stopped');
   }
 }
 
-const config: DataWorkerConfig = {
-  hubPool: {
-    rpc: process.env.HUBPOOL_RPC!,
-    privateKey: process.env.HUBPOOL_PRIVATE_KEY!,
-    address: process.env.HUBPOOL_ADDRESS!
-  },
-  chainA: {
-    rpc: process.env.CHAIN_A_RPC!,
-    spokePoolAddress: process.env.SPOKEPOOL_A_ADDRESS!,
-    chainId: parseInt(process.env.CHAIN_A_ID!)
-  },
-  chainB: {
-    rpc: process.env.CHAIN_B_RPC!,
-    spokePoolAddress: process.env.SPOKEPOOL_B_ADDRESS!,
-    chainId: parseInt(process.env.CHAIN_B_ID!)
-  },
-  redisUrl: process.env.REDIS_URL!,
-  pollingInterval: 10000,
-  minRefundVolume: "100" // 100 ETH equivalent before proposing bundle
+// Multi-chain configuration
+const createMultiChainConfig = (): DataWorkerConfig => {
+  const chains: ChainConfig[] = [];
+  
+  // Parse chains from environment variables
+  const chainsConfigStr = process.env.CHAINS_CONFIG;
+  if (chainsConfigStr) {
+    try {
+      const chainsData = JSON.parse(chainsConfigStr);
+      for (const [chainId, chainData] of Object.entries(chainsData)) {
+        chains.push({
+          chainId: parseInt(chainId),
+          type: (chainData as any).type || `chain-${chainId}`,
+          rpc: (chainData as any).rpc,
+          spokePoolAddress: (chainData as any).spokePoolAddress
+        });
+      }
+    } catch (error) {
+      console.error('Error parsing CHAINS_CONFIG:', error);
+    }
+  }
+  
+  return {
+    hubPool: {
+      rpc: process.env.HUBPOOL_RPC!,
+      privateKey: process.env.HUBPOOL_PRIVATE_KEY!,
+      address: process.env.HUBPOOL_ADDRESS!
+    },
+    chains,
+    redisUrl: process.env.REDIS_URL!,
+    pollingInterval: parseInt(process.env.POLLING_INTERVAL || '10000'),
+    blockRange: parseInt(process.env.BLOCK_RANGE || '100'),
+    minRefundVolume: process.env.MIN_REFUND_VOLUME || "0"
+  };
 };
 
-const dataWorker = new AcrossDataWorker(config);
+const config = createMultiChainConfig();
+
+console.log(`🚀 Starting Multi-chain DataWorker for ${config.chains.length} chains:`);
+config.chains.forEach(chain => {
+  console.log(`  - ${chain.type} (Chain ID: ${chain.chainId})`);
+});
+
+const dataWorker = new MultiChainAcrossDataWorker(config);
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
