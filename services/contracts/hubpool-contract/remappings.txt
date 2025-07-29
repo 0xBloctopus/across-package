@@ -1,3 +1,4 @@
-@across-protocol/contracts/=lib/ontracts
+@across-protocol/contracts/=lib/contracts
 @openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@UMAprotocol/protocol=lib/protocol

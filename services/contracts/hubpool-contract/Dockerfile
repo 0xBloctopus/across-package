@@ -1,10 +1,27 @@
 # syntax=docker/dockerfile:1
 
 #############################
-# Stage 1: Build the Contracts
+# Stage 1: Install Foundry
 #############################
-FROM ghcr.io/foundry-rs/foundry:stable AS builder
+FROM ubuntu:22.04 AS foundry-installer
 USER root
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Foundry
+RUN curl -L https://foundry.paradigm.xyz | bash
+ENV PATH="/root/.foundry/bin:${PATH}"
+RUN foundryup
+
+#############################
+# Stage 2: Build the Contracts
+#############################
+FROM foundry-installer AS builder
 WORKDIR /app
 
 # Copy the project files into the container.
@@ -17,13 +34,12 @@ RUN mkdir -p /app/cache && chmod -R 777 /app/cache
 RUN forge build
 
 #############################
-# Stage 2: Runtime Container
+# Stage 3: Runtime Container
 #############################
-FROM ghcr.io/foundry-rs/foundry:stable
-USER root
+FROM foundry-installer
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y jq
+RUN apt-get update && apt-get install -y jq && rm -rf /var/lib/apt/lists/*
 
 # Copy all project files (including built artifacts) from the builder stage.
 COPY --from=builder /app /app
