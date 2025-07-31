@@ -27,10 +27,12 @@ def run(plan, args):
         service_name = "redis",
         image = "redis:7",
         max_memory=256,
-        min_memory=64
+        min_memory=64,
+        persisted=False
     )
     redis_url = "redis://{}:{}".format(redis_output.hostname, redis_output.port_number)
     plan.print("Redis running at " + redis_url)
+    
 
     chains_config = []
     for network in parsed_data.networks:
