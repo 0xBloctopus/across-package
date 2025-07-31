@@ -3,34 +3,33 @@ REQUIRED_NETWORK_FIELDS = [
     "chain_id",
     "rpc",
     "private_key",
-    "spokepool_address",
 ]
 
 REQUIRED_RELAYER_FIELDS = [
-    "private_key",
-    "polling_interval",
-    "block_range",
-    "repayment_address",
+    # "private_key",
+    # "polling_interval",
+    # "block_range",
+    # "repayment_address",
 ]
 
 REQUIRED_DATAWORKER_FIELDS = [
-    "hubpool_address",
-    "hubpool_private_key",
+    "network_type",
+    # "hubpool_private_key",
     "hubpool_rpc"
 ]
 
 def input_parser(plan, input_args):
     if "networks" not in input_args:
         fail("Input must contain 'networks' field.")
-    if "relayer" not in input_args:
-        fail("Input must contain 'relayer' field.")
+    # if "relayer" not in input_args:
+    #     fail("Input must contain 'relayer' field.")
     if "dataworker" not in input_args:
         fail("Input must contain 'dataworker' field.")
 
     networks = input_args["networks"]
     # if len(networks) < 2:
     #     fail("At least two networks must be specified.")
-    relayer = input_args["relayer"]
+    # relayer = input_args["relayer"]
     dataworker = input_args["dataworker"]
 
     parsed_networks = []
@@ -67,20 +66,19 @@ def input_parser(plan, input_args):
             chain_id = network["chain_id"],
             rpc = network["rpc"],
             private_key = network["private_key"],
-            spokepool_address = network["spokepool_address"]
         ))
 
     # Validate relayer fields
-    for field in REQUIRED_RELAYER_FIELDS:
-        if field not in relayer:
-            fail("Relayer config missing required field '%s'." % field)
+    # for field in REQUIRED_RELAYER_FIELDS:
+    #     if field not in relayer:
+    #         fail("Relayer config missing required field '%s'." % field)
 
-    parsed_relayer = struct(
-        private_key = relayer["private_key"],
-        polling_interval = relayer["polling_interval"],
-        block_range = relayer["block_range"],
-        repayment_address = relayer["repayment_address"]
-    )
+    # parsed_relayer = struct(
+    #     private_key = relayer["private_key"],
+    #     polling_interval = relayer["polling_interval"],
+    #     block_range = relayer["block_range"],
+    #     repayment_address = relayer["repayment_address"]
+    # )
 
     # Validate dataworker fields
     for field in REQUIRED_DATAWORKER_FIELDS:
@@ -88,13 +86,13 @@ def input_parser(plan, input_args):
             fail("Dataworker config missing required field '%s'." % field)
 
     parsed_dataworker = struct(
-        hubpool_address = dataworker["hubpool_address"],
-        hubpool_private_key = dataworker["hubpool_private_key"],
+        network_type = dataworker["network_type"],
+        # hubpool_private_key = dataworker["hubpool_private_key"],
         hubpool_rpc = dataworker["hubpool_rpc"]
     )
 
     return struct(
         networks = parsed_networks,
-        relayer = parsed_relayer,
+        # relayer = parsed_relayer,
         dataworker = parsed_dataworker
     )
