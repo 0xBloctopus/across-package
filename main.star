@@ -26,6 +26,8 @@ def run(plan, args):
         plan,
         service_name = "redis",
         image = "redis:7",
+        max_memory=256,
+        min_memory=64
     )
     redis_url = "redis://{}:{}".format(redis_output.hostname, redis_output.port_number)
     plan.print("Redis running at " + redis_url)
