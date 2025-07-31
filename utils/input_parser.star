@@ -14,6 +14,7 @@ REQUIRED_RELAYER_FIELDS = [
 
 REQUIRED_DATAWORKER_FIELDS = [
     "network_type",
+    "chain_id",
     # "hubpool_private_key",
     "hubpool_rpc"
 ]
@@ -87,6 +88,7 @@ def input_parser(plan, input_args):
 
     parsed_dataworker = struct(
         network_type = dataworker["network_type"],
+        chain_id = dataworker["chain_id"],
         # hubpool_private_key = dataworker["hubpool_private_key"],
         hubpool_rpc = dataworker["hubpool_rpc"]
     )
