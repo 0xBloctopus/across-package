@@ -1,20 +1,18 @@
 networks:
-  - type: ethereum
+  - type: "ethereum_mainnet"
     chain_id: "8674520"
     rpc: https://cf48a80c442840c4a8ee3d4c9fd8771a-rpc.network.bloctopus.io
     private_key: 0x660e5f63acf07c86cf8ef448bc68c4b754e16f2c96702acd9f61519a6337ed05 
-    spokepool_address: 0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5
-  - type: arbitrum
+  - type: "arbitrum_mainnet"
     chain_id: "1225280"
     rpc: https://3f3ddeba4c274a6495d82e914806b0be-rpc.network.bloctopus.io
     private_key: 0x660e5f63acf07c86cf8ef448bc68c4b754e16f2c96702acd9f61519a6337ed05
-    spokepool_address: 0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A
-relayer:
-  private_key: 0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3
-  repayment_address: 0x2e464Fc721F65921E6816c852F59ecb9147DdC9C
-  polling_interval: 5000
-  block_range: 100
+# relayer:
+#   private_key: 0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3
+#   repayment_address: 0x2e464Fc721F65921E6816c852F59ecb9147DdC9C
+#   polling_interval: 5000
+#   block_range: 100
 dataworker:
-  hubpool_address: 0x2e464Fc721F65921E6816c852F59ecb9147DdC9C
-  hubpool_private_key: 0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3
+  network_type: "ethereum_mainnet"
+  # hubpool_private_key: 0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3
   hubpool_rpc: https://cf48a80c442840c4a8ee3d4c9fd8771a-rpc.network.bloctopus.io

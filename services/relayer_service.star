@@ -31,10 +31,10 @@ def deploy_multi_chain_relayer_service(plan, chains_config, redis_url, relayer_c
     for chain in chains_config:
         chain_type = chain["type"].upper()
         env_vars["{}_RPC".format(chain_type)] = chain["rpc"]
-        env_vars["{}_PRIVATE_KEY".format(chain_type)] = chain["private_key"]
         env_vars["{}_SPOKEPOOL_ADDRESS".format(chain_type)] = chain["spokepool_address"]
     
     env_vars["REDIS_URL"] = redis_url
+    env_vars["RELAYER_PRIVATE_KEY"] = str(relayer_config.get("relayer_private_key"))
     env_vars["POLLING_INTERVAL"] = str(relayer_config.get("polling_interval", 5000))
     env_vars["BLOCK_RANGE"] = str(relayer_config.get("block_range", 100))
     env_vars["REPAYMENT_CHAIN_ID"] = str(relayer_config.get("repayment_chain_id", 1225280))
@@ -43,7 +43,6 @@ def deploy_multi_chain_relayer_service(plan, chains_config, redis_url, relayer_c
     chains_json = json.encode({
         chain["chain_id"]: {
             "rpc": "${{{}}}".format("{}_RPC".format(chain["type"].upper())),
-            "privateKey": "${{{}}}".format("{}_PRIVATE_KEY".format(chain["type"].upper())),
             "spokePoolAddress": "${{{}}}".format("{}_SPOKEPOOL_ADDRESS".format(chain["type"].upper())),
             "chainId": int(chain["chain_id"]),
             "type": chain["type"]
@@ -56,7 +55,7 @@ def deploy_multi_chain_relayer_service(plan, chains_config, redis_url, relayer_c
     relayer_service = plan.add_service(
         name="across-relayer",
         config=ServiceConfig(
-            image="raveenabhasin/across-mock-relayer:0.0.3",  
+            image="raveenabhasin/across-mock-relayer:0.0.5",  
             ports={},
             entrypoint=["node", "dist/index.js"],  
             cmd=[],

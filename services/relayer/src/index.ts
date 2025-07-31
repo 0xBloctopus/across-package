@@ -4,7 +4,7 @@ import 'dotenv/config';
 
 interface ChainConfig {
   rpc: string;
-  privateKey: string;
+  // privateKey: string;
   spokePoolAddress: string;
   chainId: number;
   type: string; 
@@ -17,6 +17,7 @@ interface RelayerConfig {
   blockRange?: number;
   repaymentChainId?: number;
   repaymentAddress?: string;
+  relayerPrivateKey?: string;
 }
 
 interface ChainState {
@@ -36,6 +37,7 @@ class MultiChainAcrossRelayer {
   private isRunning: boolean = false;
   private repaymentChainId: number;
   private repaymentAddress: string;
+  private relayerPrivateKey: string;
 
   constructor(config: RelayerConfig) {
     console.log('🚀 Initializing Multi-Chain Across Relayer...');
@@ -44,6 +46,7 @@ class MultiChainAcrossRelayer {
     this.blockRange = config.blockRange || 100;
     this.repaymentChainId = config.repaymentChainId || 1225280;
     this.repaymentAddress = config.repaymentAddress || '0x333F13a6913553EE8C380173B16449d1F7AD0aF9';
+    this.relayerPrivateKey = config.relayerPrivateKey || '';
     this.redis = createClient({ url: config.redisUrl });
 
     const spokePoolAbi = [
@@ -56,7 +59,7 @@ class MultiChainAcrossRelayer {
       console.log(`🔧 Setting up chain ${chainConfig.type} (${chainId})`);
       
       const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
-      const wallet = new ethers.Wallet(chainConfig.privateKey, provider);
+      const wallet = new ethers.Wallet(this.relayerPrivateKey, provider);
       const spokePool = new ethers.Contract(chainConfig.spokePoolAddress, spokePoolAbi, wallet);
 
       const chainState: ChainState = {
@@ -303,7 +306,7 @@ class MultiChainAcrossRelayer {
     ];
 
     const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
-    const wallet = new ethers.Wallet(chainConfig.privateKey, provider);
+    const wallet = new ethers.Wallet(this.relayerPrivateKey, provider);
     const spokePool = new ethers.Contract(chainConfig.spokePoolAddress, spokePoolAbi, wallet);
 
     const chainState: ChainState = {
@@ -358,7 +361,7 @@ function buildChainsConfig(): { [chainId: string]: ChainConfig } {
         const config = chainConfig as any;
         chains[chainId] = {
           rpc: process.env[config.rpc.replace('${', '').replace('}', '')] || config.rpc,
-          privateKey: process.env[config.privateKey.replace('${', '').replace('}', '')] || config.privateKey,
+          // privateKey: process.env[config.privateKey.replace('${', '').replace('}', '')] || config.privateKey,
           spokePoolAddress: process.env[config.spokePoolAddress.replace('${', '').replace('}', '')] || config.spokePoolAddress,
           chainId: config.chainId,
           type: config.type
@@ -388,7 +391,8 @@ const config: RelayerConfig = {
   pollingInterval: parseInt(process.env.POLLING_INTERVAL || '5000'),
   blockRange: parseInt(process.env.BLOCK_RANGE || '100'),
   repaymentChainId: parseInt(process.env.REPAYMENT_CHAIN_ID || '1225280'),
-  repaymentAddress: process.env.REPAYMENT_ADDRESS || '0x333F13a6913553EE8C380173B16449d1F7AD0aF9'
+  repaymentAddress: process.env.REPAYMENT_ADDRESS || '0x333F13a6913553EE8C380173B16449d1F7AD0aF9',
+  relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY || ''
 };
 
 const relayer = new MultiChainAcrossRelayer(config);
