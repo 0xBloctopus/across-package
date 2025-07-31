@@ -116,6 +116,17 @@ def run(plan, args):
     # plan.print("DataWorker service: across-dataworker")
     # plan.print("Redis: " + redis_url)
 
-    # return output
+    output = struct(
+        chains = [
+            struct(
+                network_type = network.type,
+                spokepool_address = constants.NETWORK_ADDRESSES[network.type].get("spokePool", "")
+            )
+            for network in parsed_data.networks
+        ],
+        hubpool_address = constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"],
+        relayer_address = constants.RELAYER_INFO["repayment_address"]
+    )
+    return output
     
    
