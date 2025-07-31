@@ -120,6 +120,7 @@ def run(plan, args):
         chains = [
             struct(
                 network_type = network.type,
+                chain_id = network.chain_id,
                 spokepool_address = constants.NETWORK_ADDRESSES[network.type].get("spokePool", "")
             )
             for network in parsed_data.networks
