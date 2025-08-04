@@ -348,6 +348,14 @@ class MultiChainAcrossRelayer {
   }
 }
 
+function resolveEnvPlaceholder(val: string): string {
+  if (val.startsWith('${') && val.endsWith('}')) {
+    const envKey = val.slice(2, -1)
+    return process.env[envKey] || ''
+  }
+  return val
+}
+
 // Function to build chain configuration from environment variables
 function buildChainsConfig(): { [chainId: string]: ChainConfig } {
   const chains: { [chainId: string]: ChainConfig } = {};
@@ -360,9 +368,11 @@ function buildChainsConfig(): { [chainId: string]: ChainConfig } {
       for (const [chainId, chainConfig] of Object.entries(chainsFromEnv as any)) {
         const config = chainConfig as any;
         chains[chainId] = {
-          rpc: process.env[config.rpc.replace('${', '').replace('}', '')] || config.rpc,
+          // rpc: process.env[config.rpc.replace('${', '').replace('}', '')] || config.rpc,
           // privateKey: process.env[config.privateKey.replace('${', '').replace('}', '')] || config.privateKey,
-          spokePoolAddress: process.env[config.spokePoolAddress.replace('${', '').replace('}', '')] || config.spokePoolAddress,
+          // spokePoolAddress: process.env[config.spokePoolAddress.replace('${', '').replace('}', '')] || config.spokePoolAddress,
+          rpc: resolveEnvPlaceholder(config.rpc),
+          spokePoolAddress: resolveEnvPlaceholder(config.spokePoolAddress),
           chainId: config.chainId,
           type: config.type
         };
