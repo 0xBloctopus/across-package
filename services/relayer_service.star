@@ -55,7 +55,7 @@ def deploy_multi_chain_relayer_service(plan, chains_config, redis_url, relayer_c
     relayer_service = plan.add_service(
         name="across-relayer",
         config=ServiceConfig(
-            image="raveenabhasin/across-mock-relayer:0.0.6",  
+            image="raveenabhasin/across-mock-relayer:0.0.7",  
             ports={},
             entrypoint=["node", "dist/index.js"],  
             cmd=[],
