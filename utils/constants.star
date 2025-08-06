@@ -23,6 +23,64 @@ NETWORK_ADDRESSES = {
     }
 }
 
+CHAIN_METADATA = {
+    "ethereum_mainnet": {
+        "native_currency": {
+            "name": "Ether",
+            "symbol": "ETH",
+            "decimals": 18,
+        },
+        "tokens": [
+            {
+                "symbol": "ETH",
+                "name": "Ether",
+                "decimals": 18,
+                "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            },
+            {
+                "symbol": "WETH",
+                "name": "Wrapped Ether",
+                "decimals": 18,
+                "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            },
+            {
+                "symbol": "USDC",
+                "name": "USD Coin",
+                "decimals": 6,
+                "address": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+        ]
+    },
+    "arbitrum_mainnet": {
+        "native_currency": {
+            "name": "Ether",
+            "symbol": "ETH",
+            "decimals": 18,
+        },
+        "tokens": [
+            {
+                "symbol": "ETH",
+                "name": "Ether",
+                "decimals": 18,
+                "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+            },
+            {
+                "symbol": "WETH",
+                "name": "Wrapped Ether",
+                "decimals": 18,
+                "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+            },
+            {
+                "symbol": "USDC",
+                "name": "USD Coin",
+                "decimals": 6,
+                "address": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+        ]
+    },
+    # You can add entries for optimism_mainnet, base_mainnet, etc. as needed.
+}
+
 RELAYER_INFO = {
     "private_key": "0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3",
     "repayment_address": "0x2e464Fc721F65921E6816c852F59ecb9147DdC9C",

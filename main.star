@@ -10,6 +10,7 @@ pool_registration = import_module("./services/contracts/pool_registration.star")
 redis = import_module("github.com/kurtosis-tech/redis-package/main.star")
 relayer_service = import_module("./services/relayer_service.star")
 dataworker_service = import_module("./services/dataworker_service.star")
+bridge_ui_service = import_module("./services/bridge_ui_service.star")
 
 def run(plan, args):
     plan.print("Starting Across Protocol cross-chain simulation...")
@@ -97,6 +98,25 @@ def run(plan, args):
         dataworker_config
     )
 
+    supported_chains = []
+    for network in parsed_data.networks:
+        chain_meta = constants.CHAIN_METADATA[network.type]
+        chain_info = {
+            "name": network.name,
+            "chain_id": int(network.chain_id),
+            "network_type": network.type,
+            "rpc": network.rpc,
+            "spokepool_address": constants.NETWORK_ADDRESSES[network.type]["spokePool"],
+            "native_currency": chain_meta["native_currency"],
+            "tokens": chain_meta["tokens"],
+        }
+        supported_chains.append(chain_info)
+
+    bridge_ui_service = bridge_ui_service.deploy_bridge_ui_service(
+        plan,
+        supported_chains
+    )
+
     
     # plan.print("Running end-to-end test...")
     # test_result = e2e_test.run_e2e_test(
@@ -126,7 +146,10 @@ def run(plan, args):
             for network in parsed_data.networks
         ],
         hubpool_address = constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"],
-        relayer_address = constants.RELAYER_INFO["repayment_address"]
+        relayer_address = constants.RELAYER_INFO["repayment_address"],
+        bridge_ui_service = struct(
+            hostname = bridge_ui_service.hostname,
+        )
     )
     return output
     

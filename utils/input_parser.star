@@ -1,4 +1,5 @@
 REQUIRED_NETWORK_FIELDS = [
+    "name",
     "type",
     "chain_id",
     "rpc",
@@ -63,6 +64,7 @@ def input_parser(plan, input_args):
         plan.print("RPC verification passed for network '%s' (chain id: %s)" % (network["type"], result.output))
 
         parsed_networks.append(struct(
+            name = network["name"],
             type = network["type"],
             chain_id = network["chain_id"],
             rpc = network["rpc"],
