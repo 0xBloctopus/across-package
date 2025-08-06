@@ -112,7 +112,7 @@ def run(plan, args):
         }
         supported_chains.append(chain_info)
 
-    bridge_ui_service = bridge_ui_service.deploy_bridge_ui_service(
+    bridge_ui = bridge_ui_service.deploy_bridge_ui_service(
         plan,
         supported_chains
     )
@@ -147,8 +147,8 @@ def run(plan, args):
         ],
         hubpool_address = constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"],
         relayer_address = constants.RELAYER_INFO["repayment_address"],
-        bridge_ui_service = struct(
-            hostname = bridge_ui_service.hostname,
+        bridge_ui = struct(
+            hostname = bridge_ui.hostname,
         )
     )
     return output
