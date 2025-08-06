@@ -19,15 +19,15 @@ def deploy_bridge_ui_service(plan, supported_chains):
 
     plan.print("chain env")
     plan.print(env_vars)
-    
+
     bridge_ui_service = plan.add_service(
         name = "bridge-ui",
         config = ServiceConfig(
-            image = "raveenabhasin/across-mock-bridge-ui:0.0.2",  # Replace with your actual image tag
+            image = "raveenabhasin/across-mock-bridge-ui:0.0.3",  
             ports = {
                 "ui": PortSpec(number=80, transport_protocol="TCP", wait=None)
             },
-            entrypoint = [],  # Use image's default entrypoint (like npm run preview or serve)
+            entrypoint = [], 
             cmd = [],
             env_vars = env_vars,
         ),
