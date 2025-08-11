@@ -38,16 +38,10 @@ CHAIN_METADATA = {
                 "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
             },
             {
-                "symbol": "WETH",
-                "name": "Wrapped Ether",
-                "decimals": 18,
-                "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
-            },
-            {
                 "symbol": "USDC",
                 "name": "USD Coin",
                 "decimals": 6,
-                "address": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
             }
         ]
     },
@@ -65,20 +59,34 @@ CHAIN_METADATA = {
                 "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
             },
             {
-                "symbol": "WETH",
-                "name": "Wrapped Ether",
+                "symbol": "USDC",
+                "name": "USD Coin",
+                "decimals": 6,
+                "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+            }
+        ]
+    },
+    "base_mainnet": {
+        "native_currency": {
+            "name": "Ether", 
+            "symbol": "ETH",
+            "decimals": 18,
+        },
+        "tokens": [
+            {
+                "symbol": "ETH",
+                "name": "Ether",
                 "decimals": 18,
-                "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+                "address": "0x4200000000000000000000000000000000000006"
             },
             {
                 "symbol": "USDC",
                 "name": "USD Coin",
                 "decimals": 6,
-                "address": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
             }
         ]
-    },
-    # You can add entries for optimism_mainnet, base_mainnet, etc. as needed.
+    }
 }
 
 RELAYER_INFO = {
