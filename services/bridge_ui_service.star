@@ -23,7 +23,7 @@ def deploy_bridge_ui_service(plan, supported_chains):
     bridge_ui_service = plan.add_service(
         name = "bridge-ui",
         config = ServiceConfig(
-            image = "raveenabhasin/across-mock-bridge-ui:0.0.7",  
+            image = "raveenabhasin/across-mock-bridge-ui:0.0.8",  
             ports = {
                 "ui": PortSpec(number=80, transport_protocol="TCP", wait=None)
             },
