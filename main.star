@@ -11,6 +11,7 @@ redis = import_module("github.com/kurtosis-tech/redis-package/main.star")
 relayer_service = import_module("./services/relayer_service.star")
 dataworker_service = import_module("./services/dataworker_service.star")
 bridge_ui_service = import_module("./services/bridge_ui_service.star")
+approve_tokens_service = import_module("./services/approve_tokens.star")
 
 def run(plan, args):
     plan.print("Starting Across Protocol cross-chain simulation...")
@@ -117,6 +118,14 @@ def run(plan, args):
         supported_chains
     )
 
+    # Run ETH token approvals on all SpokePool addresses
+    plan.print("Running ETH token approvals...")
+    approval_result = approve_tokens_service.run_eth_token_approval_script(
+        plan=plan,
+        networks=supported_chains,
+        relayer_private_key=constants.RELAYER_INFO["private_key"],
+        amount="1000000000000000000000"  # 1000 ETH in wei
+    )
     
     # plan.print("Running end-to-end test...")
     # test_result = e2e_test.run_e2e_test(
