@@ -31,7 +31,7 @@ def run_eth_token_approval_script(plan, networks, relayer_private_key, amount="1
     # Upload the shell script to the service
     script_artifact = plan.upload_files(
         name="eth-approval-script",
-        src="./approve_eth_tokens.sh",
+        src="approve_eth_tokens.sh",
         description="ETH token approval shell script"
     )
     
@@ -45,12 +45,12 @@ def run_eth_token_approval_script(plan, networks, relayer_private_key, amount="1
     result = plan.run_sh(
         name="run-eth-token-approvals",
         description="Execute ETH token approvals on all SpokePool addresses",
-        image="raveenabhasin/across-mock-contracts:0.0.8",
+        image="raveenabhasin/across-mock-contracts:0.0.9",
         files={
             "/scripts": script_artifact
         },
         env_vars=env_vars,
-        run="chmod +x /scripts/approve_eth_tokens.sh && /scripts/approve_eth_tokens.sh " + amount
+        run="chmod +x /scripts/* && /scripts/approve_eth_tokens.sh " + amount
     )
     
     plan.print("ETH Token Approval Script Output:")
