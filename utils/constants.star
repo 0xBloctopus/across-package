@@ -43,7 +43,8 @@ CHAIN_METADATA = {
                 "decimals": 6,
                 "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
             }
-        ]
+        ],
+        "router_address": "",
     },
     "arbitrum_mainnet": {
         "native_currency": {
@@ -64,7 +65,8 @@ CHAIN_METADATA = {
                 "decimals": 6,
                 "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
             }
-        ]
+        ],
+        "router_address": "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"
     },
     "base_mainnet": {
         "native_currency": {
@@ -85,13 +87,14 @@ CHAIN_METADATA = {
                 "decimals": 6,
                 "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
             }
-        ]
+        ],
+        "router_address": "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"
     }
 }
 
 RELAYER_INFO = {
     "private_key": "0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3",
-    "repayment_address": "0x2e464Fc721F65921E6816c852F59ecb9147DdC9C",
+    "repayment_address": "0x333F13a6913553EE8C380173B16449d1F7AD0aF9",
     "polling_interval": "5000",
     "block_range": "100"
 }

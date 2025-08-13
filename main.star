@@ -12,17 +12,13 @@ relayer_service = import_module("./services/relayer_service.star")
 dataworker_service = import_module("./services/dataworker_service.star")
 bridge_ui_service = import_module("./services/bridge_ui_service.star")
 approve_tokens_service = import_module("./services/approve_tokens.star")
+swap_service = import_module("./services/swap_tokens.star")
 
 def run(plan, args):
     plan.print("Starting Across Protocol cross-chain simulation...")
     plan.print("Parsing the L1 input args")
     parsed_data = input_parser.input_parser(plan, args)
     plan.print(parsed_data)
-    # plan.print("relayer")
-    # plan.print(parsed_data.relayer)
-    # plan.print("dataworker")
-    # plan.print(parsed_data.dataworker)
-    
   
     redis_output = redis.run(
         plan,
@@ -110,6 +106,7 @@ def run(plan, args):
             "spokepool_address": constants.NETWORK_ADDRESSES[network.type]["spokePool"],
             "native_currency": chain_meta["native_currency"],
             "tokens": chain_meta["tokens"],
+            "router_address": chain_meta["router_address"]
         }
         supported_chains.append(chain_info)
 
@@ -118,35 +115,22 @@ def run(plan, args):
         supported_chains
     )
 
-    # Run ETH token approvals on all SpokePool addresses
-    plan.print("Running ETH token approvals...")
-    approval_result = approve_tokens_service.run_eth_token_approval_script(
+    plan.print("Swap ETH for USDC for relayer...")
+    swap_result = swap_service.run_eth_to_usdc_swaps(
         plan=plan,
         networks=supported_chains,
         relayer_private_key=constants.RELAYER_INFO["private_key"],
-        amount="1000000000000000000000"  # 1000 ETH in wei
+    )
+
+    plan.print("Running token approvals...")
+    approval_result = approve_tokens_service.run_eth_usdc_token_approval_script(
+        plan=plan,
+        networks=supported_chains,
+        relayer_private_key=constants.RELAYER_INFO["private_key"],
     )
     
-    # plan.print("Running end-to-end test...")
-    # test_result = e2e_test.run_e2e_test(
-    #     plan,
-    #     networks,
-    #     spokepool_deployment_output["spokepool_address"],
-    #     spoke_pool_b_address["spokepool_address"],
-    #     weth_deployment_output["weth_address"],
-    #     weth_deployment_output_b["weth_address"]
-    # )
-    
-    # plan.print("Across Protocol deployment complete!")
-    # plan.print("HubPool: " + hubpool_deployment_output["hubpool_address"])
-    # plan.print("SpokePool A: " + spokepool_deployment_output["spokepool_address"])
-    # plan.print("SpokePool B: " + spoke_pool_b_address["spokepool_address"])
-    # plan.print("Relayer service: across-relayer")
-    # plan.print("DataWorker service: across-dataworker")
-    # plan.print("Redis: " + redis_url)
-
-    output = struct(
-        chains = [
+    output_dict = {
+        "chains": [
             struct(
                 network_type = network.type,
                 chain_id = network.chain_id,
@@ -154,12 +138,14 @@ def run(plan, args):
             )
             for network in parsed_data.networks
         ],
-        hubpool_address = constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"],
-        relayer_address = constants.RELAYER_INFO["repayment_address"],
-        bridge_ui = struct(
+        "hubpool_address": constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"],
+        "relayer_address": constants.RELAYER_INFO["repayment_address"],
+        "bridge_ui": struct(
             hostname = bridge_ui.hostname,
         )
-    )
+    }
+    
+    output = struct(**output_dict)
     return output
     
    
