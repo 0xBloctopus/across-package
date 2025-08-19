@@ -61,7 +61,7 @@ def deploy_multi_chain_dataworker_service(plan, chains_config, hubpool_config, r
     dataworker_service = plan.add_service(
         name="across-dataworker",
         config=ServiceConfig(
-            image="raveenabhasin/across-mock-dataworker:0.0.4",  
+            image="raveenabhasin/across-mock-dataworker:0.0.5",  
             ports={},
             entrypoint=["node", "dist/index.js"],  
             cmd=[],

@@ -422,6 +422,18 @@ class MultiChainAcrossDataWorker {
   }
 
   private async processRelayData() {
+    // Only propose a bundle if there is at least one FilledRelay event AND no active bundle proposal
+    const bundleProposal = await this.hubPool.rootBundleProposal();
+    const hasActiveProposal = bundleProposal.unclaimedPoolRebalanceLeafCount && bundleProposal.unclaimedPoolRebalanceLeafCount > 0n;
+    if (this.relayData.length === 0 || hasActiveProposal) {
+      if (this.relayData.length === 0) {
+        console.log('⏳ No FilledRelay events observed, not proposing bundle yet.');
+      }
+      if (hasActiveProposal) {
+        console.log('⏳ Active bundle proposal exists, not proposing new bundle.');
+      }
+      return;
+    }
     console.log('🏗️  Building bundle for proposal...');
 
     try {
@@ -442,6 +454,17 @@ class MultiChainAcrossDataWorker {
       console.log('  - Total refund leaves:', this.relayerRefundLeaves.length);
       console.log('  - Evaluation blocks:', bundleEvaluationBlockNumbers);
       console.log('  - Chains covered:', Array.from(this.chainWorkers.keys()));
+
+      const tx = await this.hubPool.proposeRootBundle(
+        bundleEvaluationBlockNumbers,
+        this.poolRebalanceLeaves.length, 
+        poolRebalanceRoot, 
+        relayerRefundRoot,
+        ethers.ZeroHash // No slow relay root
+      );
+      
+      await tx.wait();
+      console.log(`✅ Relayer refund bundle proposed: ${tx.hash}`);
       
       // Store bundle info in Redis
       await this.redis.set('lastBundleProposal', JSON.stringify({
