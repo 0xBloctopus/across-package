@@ -93,14 +93,14 @@ CHAIN_METADATA = {
 }
 
 RELAYER_INFO = {
-    "private_key": "0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3",
-    "repayment_address": "0x333F13a6913553EE8C380173B16449d1F7AD0aF9",
+    "private_key": "0xbcdf20249abf0ed6d944c0288fad489e33f66b3960d9e6229c1cd214ed3bbe31",
+    "repayment_address": "0x8943545177806ED17B9F23F0a21ee5948eCaa776",
     "polling_interval": "5000",
     "block_range": "100"
 }
 
 DATAWORKER_INFO = {
-    "private_key": "0x27816b667cf972e25802edd470c09b2c13fbd152c9371117e2b5c29fdf0f30c3",
+    "private_key": "0xbcdf20249abf0ed6d944c0288fad489e33f66b3960d9e6229c1cd214ed3bbe31",
     "polling_interval": "5000",
     "block_range": "100",
     "min_refund_volume": "0"
