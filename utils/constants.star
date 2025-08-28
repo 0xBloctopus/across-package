@@ -89,6 +89,50 @@ CHAIN_METADATA = {
             }
         ],
         "router_address": "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"
+    },
+    "optimism_mainnet": {
+        "native_currency": {
+            "name": "Ether", 
+            "symbol": "ETH",
+            "decimals": 18,
+        },
+        "tokens": [
+            {
+                "symbol": "ETH",
+                "name": "Ether",
+                "decimals": 18,
+                "address": "0x4200000000000000000000000000000000000006"
+            },
+            {
+                "symbol": "USDC",
+                "name": "USD Coin",
+                "decimals": 6,
+                "address": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+            }
+        ],
+        "router_address": "0x4A7b5Da61326A6379179b40d00F57E5bbDC962c2"
+    },
+    "zksync_mainnet": {
+        "native_currency": {
+            "name": "Ether", 
+            "symbol": "ETH",
+            "decimals": 18,
+        },
+        "tokens": [
+            {
+                "symbol": "ETH",
+                "name": "Ether",
+                "decimals": 18,
+                "address": "0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91"
+            },
+            {
+                "symbol": "USDC",
+                "name": "USD Coin",
+                "decimals": 6,
+                "address": "0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4"
+            }
+        ],
+        "router_address": ""
     }
 }
 
