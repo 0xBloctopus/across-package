@@ -32,8 +32,12 @@ def run_fund_relayer_weth(
         )
 
         plan.print("Funding WETH for network: " + (n.get("name") or n.get("network_type")))
+
+        net_suffix = (n.get("network_type") or "unknown").replace("_", "-")
+        service_name = "fund-weth-" + net_suffix
+
         res = plan.run_sh(
-            name = "fund-weth-" + (n.get("network_type") or "unknown"),
+            name = service_name,
             description = "Deposit ETH into WETH for relayer",
             image = image,
             env_vars = { "RELAYER_PRIVATE_KEY": relayer_private_key },
