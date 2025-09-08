@@ -33,6 +33,7 @@ def input_parser(plan, input_args):
     #     fail("At least two networks must be specified.")
     # relayer = input_args["relayer"]
     dataworker = input_args["dataworker"]
+    deploy_contract = input_args["deploy_contract"]
 
     parsed_networks = []
     for idx, network in enumerate(networks):
@@ -98,5 +99,6 @@ def input_parser(plan, input_args):
     return struct(
         networks = parsed_networks,
         # relayer = parsed_relayer,
-        dataworker = parsed_dataworker
+        dataworker = parsed_dataworker,
+        deploy_contract = deploy_contract
     )

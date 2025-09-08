@@ -1,15 +1,16 @@
 networks:
   - name: "Skillful Orangutan"
     type: "ethereum_mainnet"
-    chain_id: "2275216"
-    rpc: https://e2935bab358f4efb88088875bb695a6f-rpc.network.dev.bloctopus.io
-    private_key: 0x660e5f63acf07c86cf8ef448bc68c4b754e16f2c96702acd9f61519a6337ed05 
+    chain_id: "6448980"
+    rpc: https://7bd241dd907841cc904c5d1e5386be97-rpc.network.bloctopus.io
+    private_key: 0x928eb5b8ba4e2560909debd29862e49b3f07a9feaf4d18b743c21d14bab3b2d8 
   - name: "Loyal Owl"
-    type: "base_mainnet"
-    chain_id: "5454871"
-    rpc: https://969c283710464a2ebc0d5d2f55811b83-rpc.network.dev.bloctopus.io
-    private_key: 0x660e5f63acf07c86cf8ef448bc68c4b754e16f2c96702acd9f61519a6337ed05
+    type: "arbitrum_mainnet"
+    chain_id: "5257230"
+    rpc: https://5de863e54f7e4cd68cf5071ec493cd3f-rpc.network.bloctopus.io
+    private_key: 0x928eb5b8ba4e2560909debd29862e49b3f07a9feaf4d18b743c21d14bab3b2d8
 dataworker:
   network_type: "ethereum_mainnet"
-  chain_id: "2275216"
-  hubpool_rpc: https://e587d30f4ee64ee7877ae88916786263-rpc.network.dev.bloctopus.io
+  chain_id: "6448980"
+  hubpool_rpc: https://7bd241dd907841cc904c5d1e5386be97-rpc.network.bloctopus.io
+deploy_contract: true

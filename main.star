@@ -19,6 +19,180 @@ def run(plan, args):
     plan.print("Parsing the L1 input args")
     parsed_data = input_parser.input_parser(plan, args)
     plan.print(parsed_data)
+
+    deploy_contract = parsed_data.deploy_contract
+    networks = parsed_data.networks
+    if deploy_contract:
+        # Deploy across all networks, with HubPool only on ethereum_mainnet
+        deployed_addresses = {}
+
+        # Identify the hub network (ethereum_mainnet)
+        hub_network = None
+        for n in networks:
+            if n.type == "ethereum_mainnet":
+                hub_network = n
+                break
+        if hub_network == None:
+            fail("No network of type 'ethereum_mainnet' found; required for HubPool deployment")
+
+        # First deploy on hub network
+        plan.print("Deploying contracts on hub network (ethereum_mainnet): " + hub_network.name)
+
+        hub_weth = deployer.deploy_contract(
+            plan,
+            "script/DeployWETH.s.sol",
+            "DeployWETH",
+            hub_network.rpc,
+            hub_network.private_key
+        )
+        plan.print("WETH (hub) at: " + hub_weth)
+
+        lp_token_factory_address = deployer.deploy_contract(
+            plan,
+            "script/DeployLpTokenFactory.s.sol",
+            "DeployLpTokenFactory",
+            hub_network.rpc,
+            hub_network.private_key
+        )
+        plan.print("LpTokenFactory at: " + lp_token_factory_address)
+
+        finder_address = deployer.deploy_contract(
+            plan,
+            "script/DeployFinder.s.sol",
+            "DeployFinder",
+            hub_network.rpc,
+            hub_network.private_key
+        )
+        plan.print("Finder at: " + finder_address)
+
+        hub_adapter = deployer.deploy_contract(
+            plan,
+            "script/DeployAdapter.s.sol",
+            "DeployAdapter",
+            hub_network.rpc,
+            hub_network.private_key
+        )
+        plan.print("Adapter (hub) at: " + hub_adapter)
+
+        hubpool_address = deployer.deploy_contract(
+            plan,
+            "script/DeployHubPool.s.sol",
+            "DeployHubPool",
+            hub_network.rpc,
+            hub_network.private_key,
+            {
+                "LP_TOKEN_FACTORY": lp_token_factory_address,
+                "FINDER": finder_address,
+                "WETH": hub_weth,
+            }
+        )
+        plan.print("HubPool at: " + hubpool_address)
+
+        # Deploy SpokePool on hub network as well
+        spokepool_impl_hub = deployer.deploy_contract(
+            plan,
+            "script/DeploySpokePoolImpl.s.sol",
+            "DeploySpokePoolImpl",
+            hub_network.rpc,
+            hub_network.private_key,
+            {
+                "WETH": hub_weth,
+                "HUBPOOL_ADDRESS": hubpool_address
+            }
+        )
+        plan.print("SpokePool impl (hub) at: " + spokepool_impl_hub)
+
+        spokepool_proxy_hub = deployer.deploy_contract(
+            plan,
+            "script/DeploySpokePoolProxy.s.sol",
+            "DeploySpokePoolProxy",
+            hub_network.rpc,
+            hub_network.private_key,
+            {
+                "SPOKEPOOL_IMPL": spokepool_impl_hub.strip(),
+                "HUBPOOL_ADDRESS": hubpool_address
+            }
+        )
+        plan.print("SpokePool proxy (hub) at: " + spokepool_proxy_hub)
+
+        deployed_addresses[hub_network.type] = {
+            "weth": hub_weth,
+            "adapter": hub_adapter,
+            "spokePool": spokepool_proxy_hub,
+            "hubPool": hubpool_address,
+        }
+
+        # Deploy to all non-hub networks
+        for n in networks:
+            if n.type == hub_network.type:
+                continue
+            plan.print("Deploying contracts on network: " + n.name + " (" + n.type + ")")
+
+            weth_addr = deployer.deploy_contract(
+                plan,
+                "script/DeployWETH.s.sol",
+                "DeployWETH",
+                n.rpc,
+                n.private_key
+            )
+            plan.print("WETH at: " + weth_addr)
+
+            adapter_addr = deployer.deploy_contract(
+                plan,
+                "script/DeployAdapter.s.sol",
+                "DeployAdapter",
+                n.rpc,
+                n.private_key
+            )
+            plan.print("Adapter at: " + adapter_addr)
+
+            sp_impl = deployer.deploy_contract(
+                plan,
+                "script/DeploySpokePoolImpl.s.sol",
+                "DeploySpokePoolImpl",
+                n.rpc,
+                n.private_key,
+                {
+                    "WETH": weth_addr,
+                    "HUBPOOL_ADDRESS": hubpool_address
+                }
+            )
+            plan.print("SpokePool impl at: " + sp_impl)
+
+            sp_proxy = deployer.deploy_contract(
+                plan,
+                "script/DeploySpokePoolProxy.s.sol",
+                "DeploySpokePoolProxy",
+                n.rpc,
+                n.private_key,
+                {
+                    "SPOKEPOOL_IMPL": sp_impl.strip(),
+                    "HUBPOOL_ADDRESS": hubpool_address
+                }
+            )
+            plan.print("SpokePool proxy at: " + sp_proxy)
+
+            deployed_addresses[n.type] = {
+                "weth": weth_addr,
+                "adapter": adapter_addr,
+                "spokePool": sp_proxy,
+            }
+
+        # Register spoke pools for all networks in HubPool
+        for n in networks:
+            plan.print("Registering spoke for network " + n.type + " (chain_id=" + str(n.chain_id) + ") with HubPool...")
+            addrs = deployed_addresses.get(n.type, {})
+            adapter_to_register = addrs.get("adapter", "")
+            spokepool_to_register = addrs.get("spokePool", "")
+            pool_registration.register_spoke_pools(
+                plan,
+                hub_network.rpc,
+                hub_network.private_key,
+                hubpool_address,
+                n.chain_id,
+                adapter_to_register,
+                spokepool_to_register,
+            )
   
     redis_output = redis.run(
         plan,
@@ -34,12 +208,17 @@ def run(plan, args):
 
     chains_config = []
     for network in parsed_data.networks:
+        # Prefer deployed addresses if available
+        _dyn = {}
+        if deploy_contract:
+            # Keep in sync with keys in deployed_addresses
+            _dyn = deployed_addresses.get(network.type, {})
         chain_config = {
             "chain_id": network.chain_id,
             "type": network.type,  
             "rpc": network.rpc,
             "private_key": network.private_key,
-            "spokepool_address": constants.NETWORK_ADDRESSES[network.type]["spokePool"]
+            "spokepool_address": _dyn.get("spokePool", constants.NETWORK_ADDRESSES[network.type]["spokePool"])
         }
         chains_config.append(chain_config)
     
@@ -68,11 +247,15 @@ def run(plan, args):
     plan.print("Deploying DataWorker service...")
     
     # Prepare hubpool configuration for dataworker
+    # Prefer deployed HubPool on ethereum_mainnet if present
+    _hub_addr = None
+    if deploy_contract:
+        _hub_addr = deployed_addresses.get("ethereum_mainnet", {}).get("hubPool")
     hubpool_config = {
         "rpc": parsed_data.dataworker.hubpool_rpc,
         # "private_key": parsed_data.dataworker.hubpool_private_key,
         "private_key": constants.DATAWORKER_INFO["private_key"],
-        "address": constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"]
+        "address": _hub_addr if _hub_addr != None and _hub_addr != "" else constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"]
     }
     
     # Prepare dataworker-specific settings
@@ -98,12 +281,15 @@ def run(plan, args):
     supported_chains = []
     for network in parsed_data.networks:
         chain_meta = constants.CHAIN_METADATA[network.type]
+        _dyn = {}
+        if deploy_contract:
+            _dyn = deployed_addresses.get(network.type, {})
         chain_info = {
             "name": network.name,
             "chain_id": int(network.chain_id),
             "network_type": network.type,
             "rpc": network.rpc,
-            "spokepool_address": constants.NETWORK_ADDRESSES[network.type]["spokePool"],
+            "spokepool_address": _dyn.get("spokePool", constants.NETWORK_ADDRESSES[network.type]["spokePool"]),
             "native_currency": chain_meta["native_currency"],
             "tokens": chain_meta["tokens"],
             "router_address": chain_meta["router_address"]
@@ -134,11 +320,11 @@ def run(plan, args):
             struct(
                 network_type = network.type,
                 chain_id = network.chain_id,
-                spokepool_address = constants.NETWORK_ADDRESSES[network.type].get("spokePool", "")
+                spokepool_address = (deployed_addresses.get(network.type, {}).get("spokePool") if deploy_contract else constants.NETWORK_ADDRESSES[network.type].get("spokePool", ""))
             )
             for network in parsed_data.networks
         ],
-        "hubpool_address": constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"],
+        "hubpool_address": (_hub_addr if _hub_addr != None and _hub_addr != "" else constants.NETWORK_ADDRESSES[parsed_data.dataworker.network_type]["hubPool"]),
         "relayer_address": constants.RELAYER_INFO["repayment_address"],
         "bridge_ui": struct(
             hostname = bridge_ui.hostname,
