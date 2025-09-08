@@ -13,6 +13,7 @@ dataworker_service = import_module("./services/dataworker_service.star")
 bridge_ui_service = import_module("./services/bridge_ui_service.star")
 approve_tokens_service = import_module("./services/approve_tokens.star")
 swap_service = import_module("./services/swap_tokens.star")
+fund_weth_service = import_module("./services/fund_weth.star")
 
 def run(plan, args):
     plan.print("Starting Across Protocol cross-chain simulation...")
@@ -113,6 +114,14 @@ def run(plan, args):
     bridge_ui = bridge_ui_service.deploy_bridge_ui_service(
         plan,
         supported_chains
+    )
+
+    plan.print("Funding relayer with WETH (deposit 10 ETH -> WETH) on all networks...")
+    fund_result = fund_weth_service.run_fund_relayer_weth(
+        plan=plan,
+        networks=supported_chains,
+        relayer_private_key=constants.RELAYER_INFO["private_key"],
+        amount_eth="10",
     )
 
     plan.print("Swap ETH for USDC for relayer...")
