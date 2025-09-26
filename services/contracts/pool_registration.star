@@ -15,7 +15,7 @@ def register_spoke_pools(plan, rpc, private_key, hubpool_address, chain_id, adap
     plan.run_sh(
         name="register-spokepool",
         description="Set Cross Chain Contracts on HubPool",
-        image="across-mock-contracts:0.0.8",
+        image="raveenabhasin/across-mock-contracts:0.0.9",
         env_vars=env_vars,
         run=register_a_cmd.strip()
     )
@@ -27,7 +27,7 @@ def register_spoke_pools(plan, rpc, private_key, hubpool_address, chain_id, adap
     verification = plan.run_sh(
         name="verify-registration",
         description="Verify Cross Chain Contracts registration",
-        image="across-mock-contracts:0.0.8",
+        image="raveenabhasin/across-mock-contracts:0.0.9",
         env_vars=env_vars,
         run=verify_cmd.strip()
     )

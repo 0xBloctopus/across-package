@@ -39,18 +39,20 @@ def deploy_contract(plan, script_path, contract_name, rpc_url, private_key, env_
     })
     script_full = script_path + ":" + contract_name
 
-    # if contract_name == "DeploySpokePoolImpl":
-    #    cmd = (
-    #         "forge script " + script_full +
-    #         " --broadcast --json --skip-simulation --via-ir --rpc-url $RPC_URL --private-key $PRIVATE_KEY 2>&1 " +
-    #         "| grep 'Contract deployed at: ' | grep -o '0x[a-fA-F0-9]\\{40\\}' | head -n 1 | tr -d '\\n'"
-    #     ) 
-    # else:
-    cmd = (
-        "forge script " + script_full +
-        " --broadcast --json --skip-simulation --via-ir --rpc-url $RPC_URL --private-key $PRIVATE_KEY 2>&1 " +
-        "| grep 'Contract deployed at: ' | grep -o '0x[a-fA-F0-9]\\{40\\}' | head -n 1 | tr -d '\\n'"
-    )
+    if contract_name == "DeploySpokePoolProxy":
+        # Some scripts may not print the exact 'Contract deployed at:' line.
+        # Fallback to extracting the last 0x...40-hex address from the output.
+        cmd = (
+            "forge script " + script_full +
+            " --broadcast --json --skip-simulation --via-ir --rpc-url $RPC_URL --private-key $PRIVATE_KEY 2>&1 " +
+            "| grep -o '0x[a-fA-F0-9]\\{40\\}' | tail -n 1 | tr -d '\\n'"
+        )
+    else:
+        cmd = (
+            "forge script " + script_full +
+            " --broadcast --json --skip-simulation --via-ir --rpc-url $RPC_URL --private-key $PRIVATE_KEY 2>&1 " +
+            "| grep 'Contract deployed at: ' | grep -o '0x[a-fA-F0-9]\\{40\\}' | head -n 1 | tr -d '\\n'"
+        )
     # else:
     #     cmd = (
     #         "forge script " + script_full +
@@ -61,7 +63,7 @@ def deploy_contract(plan, script_path, contract_name, rpc_url, private_key, env_
     deployment = plan.run_sh(
         name="generic-deployer",
         description="Deploying " + script_full,
-        image="across-mock-contracts:0.0.8",
+        image="raveenabhasin/across-mock-contracts:0.0.9",
         env_vars=env_vars,
         run=cmd.strip()
     )
